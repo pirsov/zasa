@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 """Оформление контрольных работ: А4, Times New Roman 14, интервал 1,5, абзац 1,25 см."""
 
+import copy
 import os
+import zipfile
 
 from docx import Document
+from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.section import WD_SECTION
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING, WD_TAB_ALIGNMENT
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
@@ -14,7 +17,13 @@ from lxml import etree
 
 
 FONT = "Times New Roman"
-LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dstu_logo.jpg")
+_TOOLS = os.path.dirname(os.path.abspath(__file__))
+LOGO = os.path.join(_TOOLS, "dstu_logo.jpg")
+SAMPLE_TITLE = os.path.join(
+    os.path.dirname(_TOOLS),
+    "materials",
+    "Титульный_лист_ДГТУ_образец_Азов_15.03.05.docx",
+)
 
 
 def _rfonts(rPr, name):
@@ -69,15 +78,15 @@ def _page_start(section, start):
 
 
 def _format_title_section(section):
-    """Поля как в образце титульного листа ДГТУ: левое 20 мм, правое 10 мм."""
-    section.page_width = Mm(210)
-    section.page_height = Mm(297)
-    section.left_margin = Mm(20)
-    section.right_margin = Mm(10)
-    section.top_margin = Mm(15)
-    section.bottom_margin = Mm(15)
-    section.header_distance = Mm(8)
-    section.footer_distance = Mm(8)
+    """Поля один в один с образцом: верх 1134, право 567, низ 1134, лево 1134."""
+    section.page_width = Twips(11906)
+    section.page_height = Twips(16838)
+    section.top_margin = Twips(1134)
+    section.right_margin = Twips(567)
+    section.bottom_margin = Twips(1134)
+    section.left_margin = Twips(1134)
+    section.header_distance = Twips(709)
+    section.footer_distance = Twips(709)
     section.different_first_page_header_footer = False
     try:
         section.footer.is_linked_to_previous = False
@@ -413,71 +422,162 @@ def _cell(cell, text, size=12, bold=False, align="left"):
     add_runs(p, text, size=size, bold=bold)
 
 
+_DRAWING_SEQ = 10
+
+
+def _title_style_id(doc):
+    """Стиль с параметрами Normal из образца, чтобы основной стиль работы не сдвинул титул."""
+    name = "Титул ДГТУ"
+    try:
+        style = doc.styles[name]
+    except KeyError:
+        style = doc.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
+    _set_style_font(style, 10)
+    pf = style.paragraph_format
+    pf.line_spacing = 1.0
+    pf.space_before = Pt(0)
+    pf.space_after = Pt(0)
+    pf.first_line_indent = Cm(0)
+    pf.left_indent = Cm(0)
+    pf.right_indent = Cm(0)
+    pf.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    return style.style_id
+
+
+def _strip_red(text_node):
+    run = text_node.getparent()
+    rPr = run.find(qn("w:rPr"))
+    if rPr is not None:
+        for color in list(rPr.findall(qn("w:color"))):
+            rPr.remove(color)
+    paragraph = run.getparent()
+    pPr = paragraph.find(qn("w:pPr"))
+    if pPr is None:
+        return
+    mark = pPr.find(qn("w:rPr"))
+    if mark is None:
+        return
+    for color in list(mark.findall(qn("w:color"))):
+        mark.remove(color)
+
+
+def _apply_title_style(elements, style_id):
+    for element in elements:
+        paragraphs = element.findall(".//" + qn("w:p"))
+        if element.tag == qn("w:p"):
+            paragraphs = [element] + paragraphs
+        for paragraph in paragraphs:
+            pPr = paragraph.find(qn("w:pPr"))
+            if pPr is None:
+                pPr = OxmlElement("w:pPr")
+                paragraph.insert(0, pPr)
+            pStyle = pPr.find(qn("w:pStyle"))
+            if pStyle is None:
+                pStyle = OxmlElement("w:pStyle")
+                pPr.insert(0, pStyle)
+            pStyle.set(qn("w:val"), style_id)
+
+
+def _bind_sample_logo(doc, elements):
+    global _DRAWING_SEQ
+    holder = doc.add_paragraph()
+    run = holder.add_run()
+    run.add_picture(LOGO, width=Emu(590550))
+    blip = run._r.find(".//" + qn("a:blip"))
+    rid = blip.get(qn("r:embed"))
+    holder._element.getparent().remove(holder._element)
+    for element in elements:
+        for drawing_blip in element.findall(".//" + qn("a:blip")):
+            drawing_blip.set(qn("r:embed"), rid)
+        for doc_pr in element.findall(".//" + qn("wp:docPr")):
+            _DRAWING_SEQ += 1
+            doc_pr.set("id", str(_DRAWING_SEQ))
+            doc_pr.set("name", f"Рисунок {_DRAWING_SEQ}")
+
+
+def _sample_title_elements(doc, discipline, variant, theme=None):
+    """Копия тела образца. Меняется только текст азовского филиала и красные поля примера."""
+    with zipfile.ZipFile(SAMPLE_TITLE) as archive:
+        root = etree.fromstring(archive.read("word/document.xml"))
+    body = root.find(qn("w:body"))
+    elements = [copy.deepcopy(child) for child in body if child.tag != qn("w:sectPr")]
+    nodes = []
+    for element in elements:
+        nodes.extend(element.findall(".//" + qn("w:t")))
+    expected = {
+        5: "ТЕХНОЛОГИЧЕСКИЙ ",
+        6: "ИНСТИТУТ (",
+        7: "ФИЛИАЛ",
+        8: ") ДГТУ в г. Азове",
+        9: "Факультет высшего образования",
+        10: "Кафедра «Технология машиностроения» ",
+        13: "«Технология машиностроения»",
+        14: "Направление подготовки",
+        15: "15.03.05",
+        16: "«Конструкторско-технологическое обеспечение машиностроительных производств»",
+        17: "Профиль",
+        18: "«Технология машиностроения»",
+        20: "2687646",
+        22: "9",
+        24: "З",
+        25: "КТ-31",
+        28: "И.И. Петров",
+        32: "доцент А.П. Шишкина",
+        34: "Азов",
+        35: "2025",
+    }
+    for index, original in expected.items():
+        if nodes[index].text != original:
+            raise RuntimeError(f"Образец титула изменился: узел {index} = {nodes[index].text!r}")
+    nodes[5].text = "КОЛЛЕДЖ ЭКОНОМИКИ, УПРАВЛЕНИЯ И ПРАВА"
+    nodes[6].text = ""
+    nodes[7].text = ""
+    nodes[8].text = ""
+    nodes[9].text = "Заочное отделение"
+    nodes[10].text = "Специальность 38.02.01 «Экономика и бухгалтерский учёт (по отраслям)»"
+    nodes[13].text = f"«{discipline}»"
+    nodes[15].text = "38.02.01"
+    nodes[16].text = "«Экономика и бухгалтерский учёт (по отраслям)»"
+    if theme:
+        nodes[17].text = "Тема"
+        nodes[18].text = theme
+    else:
+        nodes[18].text = ""
+    nodes[20].text = "2621578"
+    nodes[22].text = str(variant)
+    nodes[24].text = ""
+    nodes[25].text = ""
+    nodes[28].text = "В. Кисловская"
+    nodes[32].text = ""
+    nodes[34].text = "Ростов-на-Дону"
+    nodes[35].text = "2026"
+    for index in (13, 20, 22, 24, 25, 28, 32, 35):
+        _strip_red(nodes[index])
+    _apply_title_style(elements, _title_style_id(doc))
+    _bind_sample_logo(doc, elements)
+    return elements
+
+
+def _append_blocks(doc, elements):
+    body = doc.element.body
+    sect = body.find(qn("w:sectPr"))
+    for element in elements:
+        sect.addprevious(element)
+
+
 def title_block(doc, discipline, variant, theme=None, new_section=False):
-    """Титульный лист по образцу ДГТУ. Азовский филиал заменён на колледж в Ростове-на-Дону."""
+    """Вставляет скопированный титульный лист образца ДГТУ и открывает раздел основного текста."""
     if new_section:
         section = doc.add_section(WD_SECTION.NEW_PAGE)
         _format_title_section(section)
     else:
         _format_title_section(doc.sections[-1])
+        body = doc.element.body
+        for child in list(body):
+            if child.tag != qn("w:p") or child.find(qn("w:sectPr")) is not None:
+                break
+            body.remove(child)
 
-    if os.path.exists(LOGO):
-        p = _paragraph(doc, WD_ALIGN_PARAGRAPH.CENTER, 0, before=0, after=2, spacing=1.0)
-        run = p.add_run()
-        run.add_picture(LOGO, width=Cm(1.7))
-
-    center(doc, "МИНИСТЕРСТВО НАУКИ И ВЫСШЕГО ОБРАЗОВАНИЯ", bold=True, size=12, spacing=1.0)
-    center(doc, "РОССИЙСКОЙ ФЕДЕРАЦИИ", bold=True, size=12, spacing=1.0, before=0)
-    center(doc, "", spacing=1.0)
-    for line in (
-        "ФЕДЕРАЛЬНОЕ ГОСУДАРСТВЕННОЕ БЮДЖЕТНОЕ",
-        "ОБРАЗОВАТЕЛЬНОЕ УЧРЕЖДЕНИЕ ВЫСШЕГО ОБРАЗОВАНИЯ",
-        "«ДОНСКОЙ ГОСУДАРСТВЕННЫЙ ТЕХНИЧЕСКИЙ УНИВЕРСИТЕТ»",
-        "КОЛЛЕДЖ ЭКОНОМИКИ, УПРАВЛЕНИЯ И ПРАВА",
-    ):
-        center(doc, line, bold=True, size=14, spacing=1.0)
-
-    center(doc, "", spacing=1.0)
-    center(doc, "Заочное отделение", size=12, spacing=1.0)
-    center(doc, "Специальность 38.02.01", size=12, spacing=1.0)
-    center(doc, "«Экономика и бухгалтерский учёт (по отраслям)»", size=12, spacing=1.0)
-
-    center(doc, "", spacing=1.0)
-    center(doc, "КОНТРОЛЬНАЯ РАБОТА", bold=True, size=14, spacing=1.0, before=6)
-    center(doc, "", spacing=1.0)
-
-    rows = [
-        ("Дисциплина", f"«{discipline}»"),
-        ("Номер зачетной книжки", "2621578"),
-        ("Номер варианта", str(variant)),
-        ("Группа", "____________________"),
-    ]
-    if theme:
-        rows.insert(1, ("Тема", theme))
-    table = doc.add_table(rows=len(rows), cols=2)
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _set_table_widths(table, [55, 125])
-    _nil_borders(table)
-    for i, (label, value) in enumerate(rows):
-        _cell(table.rows[i].cells[0], label, size=12, align="left")
-        _cell(table.rows[i].cells[1], value, size=12, bold=True, align="left")
-
-    center(doc, "", spacing=1.0)
-    sign = doc.add_table(rows=4, cols=3)
-    sign.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _set_table_widths(sign, [70, 55, 55])
-    _nil_borders(sign)
-    _cell(sign.rows[0].cells[0], "Обучающийся", size=12)
-    _cell(sign.rows[0].cells[1], "________________", size=12, align="center")
-    _cell(sign.rows[0].cells[2], "В. Кисловская", size=12, align="right")
-    _cell(sign.rows[1].cells[1], "подпись, дата", size=9, align="center")
-    _cell(sign.rows[2].cells[0], "Контрольную работу проверил", size=12)
-    _cell(sign.rows[2].cells[1], "________________", size=12, align="center")
-    _cell(sign.rows[3].cells[1], "подпись, дата", size=9, align="center")
-
-    center(doc, "", spacing=1.0)
-    center(doc, "Ростов-на-Дону", size=12, spacing=1.0, before=8)
-    center(doc, "2026", size=12, spacing=1.0)
-
+    _append_blocks(doc, _sample_title_elements(doc, discipline, variant, theme))
     body_section = doc.add_section(WD_SECTION.NEW_PAGE)
     _format_body_section(body_section)
