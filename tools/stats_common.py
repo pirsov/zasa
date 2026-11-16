@@ -9,7 +9,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from docx_lib import (
-    STUDENT_LINES,
     add_picture,
     add_table,
     bibliography_item,
@@ -68,17 +67,15 @@ LITERATURE = [
 ]
 
 
-def start(variant, letters, question):
-    doc = new_document()
+def start(variant, letters, question, doc=None, new_section=False):
+    if doc is None:
+        doc = new_document()
     doc.core_properties.title = f"Статистика. Вариант {variant}. Зачётная книжка 2621578"
     title_block(
         doc,
-        "ОП.02 Статистика",
-        [
-            f"Вариант {variant}",
-            "Кисловская Виолетта, буква «К»",
-        ],
-        STUDENT_LINES,
+        "Статистика",
+        variant=str(variant),
+        new_section=new_section,
     )
     body(
         doc,
@@ -89,11 +86,13 @@ def start(variant, letters, question):
     return doc
 
 
-def finish(doc, path):
+def finish(doc, path=None):
     heading(doc, "Список использованной литературы")
     for i, src in enumerate(LITERATURE, 1):
         bibliography_item(doc, f"{i}. {src}")
-    doc.save(path)
+    if path:
+        doc.save(path)
+    return doc
 
 
 def line_chart(path, labels, series, ylabel, title):

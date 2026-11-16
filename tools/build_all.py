@@ -10,6 +10,8 @@ import zipfile
 from build_business import build as build_business
 from build_russian import build as build_russian
 from build_stats import build_all as build_stats
+from build_stats import variant_9
+from docx_lib import new_document
 
 ROOT = "/workspace"
 PDF = "/tmp/pdfs"
@@ -67,7 +69,7 @@ def pages_text(pdf_path):
     return text.split("\f")
 
 
-def fill_contents(docx_path):
+def detect_pages(docx_path):
     pdf = to_pdf(docx_path)
     pages = pages_text(pdf)
     found = {}
@@ -75,35 +77,33 @@ def fill_contents(docx_path):
         hits = [n for n, page in enumerate(pages, 1) if key in page]
         if not hits:
             raise SystemExit(f"Не найден заголовок: {key}")
-        # содержание на ранней странице, сам раздел — позже
         found[i] = hits[-1]
         print(f"  content {i:02d} -> page {hits[-1]}  ({key})")
-    with zipfile.ZipFile(docx_path, "r") as zin:
-        xml = zin.read("word/document.xml").decode("utf-8")
-        other = {name: zin.read(name) for name in zin.namelist() if name != "word/document.xml"}
-    for i, page in found.items():
-        xml = xml.replace(f"@@P{i:02d}@@", str(page))
-    if "@@P" in xml:
-        raise SystemExit("Остались незаполненные метки содержания")
-    tmp = docx_path + ".tmp"
-    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zout:
-        for name, data in other.items():
-            zout.writestr(name, data)
-        zout.writestr("word/document.xml", xml.encode("utf-8"))
-    os.replace(tmp, docx_path)
-    print("contents filled", docx_path, "pdf pages", len(pages))
-    return len(pages)
+    return found
+
+
+COMBINED = os.path.join(ROOT, "готовые_работы/Все_контрольные_для_печати.docx")
 
 
 def main():
     print("russian")
     build_russian(RU)
+    print("page numbers")
+    pages = detect_pages(RU)
+    build_russian(RU, pages=pages)
     print("business")
     build_business(BUS)
     print("stats")
     build_stats()
-    print("page numbers")
-    fill_contents(RU)
+    print("combined")
+    doc = new_document()
+    doc.core_properties.title = "Контрольные работы. Кисловская Виолетта. 2621578"
+    build_russian(doc=doc, pages=pages)
+    build_business(doc=doc, new_section=True)
+    variant_9(doc=doc, new_section=True)
+    doc.core_properties.title = "Контрольные работы. Кисловская Виолетта. 2621578"
+    doc.save(COMBINED)
+    print("saved", COMBINED)
 
 
 if __name__ == "__main__":

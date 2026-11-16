@@ -2,7 +2,6 @@
 """Контрольная по основам предпринимательской деятельности, вариант 8."""
 
 from docx_lib import (
-    STUDENT_LINES,
     add_table,
     bibliography_item,
     body,
@@ -21,22 +20,20 @@ def _annuity(principal, annual_rate, months):
     return principal * k
 
 
-def build(path):
+def build(path=None, doc=None, new_section=False):
     pay = _annuity(300_000, 0.18, 24)
     pay_s = f"{pay:,.2f}".replace(",", " ").replace(".", ",")
-    # 18% годовых, 24 месяца, 300 000
-    doc = new_document()
+    own = doc is None
+    if own:
+        doc = new_document()
     doc.core_properties.title = (
         "Основы предпринимательской деятельности. Вариант 8. Зачётная книжка 2621578"
     )
     title_block(
         doc,
         "Основы предпринимательской деятельности",
-        [
-            "Вариант 8",
-            "(последняя цифра номера зачётной книжки — 8)",
-        ],
-        STUDENT_LINES,
+        variant="8",
+        new_section=new_section,
     )
 
     heading(doc, "1. Юридическое лицо как субъект предпринимательской деятельности: признаки, преимущества и недостатки")
@@ -260,5 +257,6 @@ def build(path):
     ]
     for i, src in enumerate(sources, 1):
         bibliography_item(doc, f"{i}. {src}")
-    doc.save(path)
-    return pay
+    if path:
+        doc.save(path)
+    return doc

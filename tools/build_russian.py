@@ -2,7 +2,6 @@
 """Контрольная работа по русскому языку: тема 8 (последняя цифра зачётной книжки)."""
 
 from docx_lib import (
-    STUDENT_LINES,
     add_table,
     bibliography_item,
     body,
@@ -16,22 +15,19 @@ from docx_lib import (
 )
 
 
-def build(path):
-    doc = new_document()
+def build(path=None, doc=None, pages=None, new_section=False):
+    own = doc is None
+    if own:
+        doc = new_document()
     doc.core_properties.title = (
         "Антонимы и их роль в построении выразительной речи. Зачётная книжка 2621578"
     )
     title_block(
         doc,
         "Русский язык и культура речи",
-        [
-            "Тема 8. Антонимы и их роль",
-            "в построении выразительной речи",
-            "",
-            "(тема выбрана по последней цифре",
-            "номера зачётной книжки: 8)",
-        ],
-        STUDENT_LINES,
+        variant="8",
+        theme="Антонимы и их роль в построении выразительной речи",
+        new_section=new_section,
     )
 
     heading(doc, "Содержание")
@@ -54,7 +50,8 @@ def build(path):
     ]
     # номера страниц проставляются вторым проходом
     for i, item in enumerate(contents, 1):
-        body(doc, f"{item} — @@P{i:02d}@@")
+        number = str(pages[i]) if pages and i in pages else f"@@P{i:02d}@@"
+        body(doc, f"{item} — {number}")
     page_break(doc)
 
     heading(doc, "Введение")
@@ -318,5 +315,6 @@ def build(path):
         doc,
         "Памятка замыкает работу на практический навык. Теоретические различения нужны ровно постольку, поскольку помогают ответить на эти вопросы в своём тексте.",
     )
-    doc.save(path)
-    return path
+    if path:
+        doc.save(path)
+    return doc

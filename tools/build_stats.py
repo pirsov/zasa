@@ -770,8 +770,14 @@ def variant_8(path):
     finish(doc, path)
 
 
-def variant_9(path):
-    doc = start(9, "К, Л", "Понятие о средних величинах. Виды средних величин.")
+def variant_9(path=None, doc=None, new_section=False):
+    doc = start(
+        9,
+        "К, Л",
+        "Понятие о средних величинах. Виды средних величин.",
+        doc=doc,
+        new_section=new_section,
+    )
     paras(
         doc,
         [

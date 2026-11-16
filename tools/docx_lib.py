@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 """Оформление контрольных работ: А4, Times New Roman 14, интервал 1,5, абзац 1,25 см."""
 
+import os
+
 from docx import Document
+from docx.enum.section import WD_SECTION
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING, WD_TAB_ALIGNMENT
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
 from docx.oxml import OxmlElement
@@ -11,6 +14,7 @@ from lxml import etree
 
 
 FONT = "Times New Roman"
+LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dstu_logo.jpg")
 
 
 def _rfonts(rPr, name):
@@ -55,9 +59,36 @@ def _set_style_font(style, size=14):
             rPr.remove(child)
 
 
-def new_document():
-    doc = Document()
-    section = doc.sections[0]
+def _page_start(section, start):
+    sectPr = section._sectPr
+    pgNumType = sectPr.find(qn("w:pgNumType"))
+    if pgNumType is None:
+        pgNumType = OxmlElement("w:pgNumType")
+        sectPr.append(pgNumType)
+    pgNumType.set(qn("w:start"), str(start))
+
+
+def _format_title_section(section):
+    """Поля как в образце титульного листа ДГТУ: левое 20 мм, правое 10 мм."""
+    section.page_width = Mm(210)
+    section.page_height = Mm(297)
+    section.left_margin = Mm(20)
+    section.right_margin = Mm(10)
+    section.top_margin = Mm(15)
+    section.bottom_margin = Mm(15)
+    section.header_distance = Mm(8)
+    section.footer_distance = Mm(8)
+    section.different_first_page_header_footer = False
+    try:
+        section.footer.is_linked_to_previous = False
+    except Exception:
+        pass
+    p = section.footer.paragraphs[0]
+    p.clear()
+    _page_start(section, 1)
+
+
+def _format_body_section(section):
     section.page_width = Mm(210)
     section.page_height = Mm(297)
     section.left_margin = Mm(30)
@@ -66,7 +97,18 @@ def new_document():
     section.bottom_margin = Mm(20)
     section.header_distance = Mm(10)
     section.footer_distance = Mm(10)
-    section.different_first_page_header_footer = True
+    section.different_first_page_header_footer = False
+    section.footer.is_linked_to_previous = False
+    section.header.is_linked_to_previous = False
+    p = section.footer.paragraphs[0]
+    p.clear()
+    _add_page_number(section.footer)
+    _page_start(section, 2)
+
+
+def new_document():
+    doc = Document()
+    _format_title_section(doc.sections[0])
 
     normal = doc.styles["Normal"]
     _set_style_font(normal, 14)
@@ -82,11 +124,6 @@ def new_document():
             _set_style_font(doc.styles[style_name], 14)
         except KeyError:
             pass
-
-    _add_page_number(section.footer)
-    # титульный лист без номера
-    fp = section.first_page_footer.paragraphs[0]
-    fp.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     core = doc.core_properties
     core.author = "Кисловская Виолетта"
@@ -346,62 +383,101 @@ def add_picture(doc, path, width_cm=15.5):
     return p
 
 
-def title_block(doc, discipline, subject_lines, extra_lines):
-    """Титульный лист колледжа ДГТУ. Интервал одинарный, кегль 14."""
-    lines_top = [
-        "МИНИСТЕРСТВО НАУКИ И ВЫСШЕГО ОБРАЗОВАНИЯ",
-        "РОССИЙСКОЙ ФЕДЕРАЦИИ",
-        "",
+def _nil_borders(table):
+    tblPr = table._tbl.tblPr
+    borders = OxmlElement("w:tblBorders")
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        el = OxmlElement(f"w:{edge}")
+        el.set(qn("w:val"), "nil")
+        el.set(qn("w:sz"), "0")
+        el.set(qn("w:space"), "0")
+        el.set(qn("w:color"), "auto")
+        borders.append(el)
+    tblPr.append(borders)
+
+
+def _cell(cell, text, size=12, bold=False, align="left"):
+    cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+    p = cell.paragraphs[0]
+    p.clear()
+    pf = p.paragraph_format
+    pf.alignment = {
+        "left": WD_ALIGN_PARAGRAPH.LEFT,
+        "center": WD_ALIGN_PARAGRAPH.CENTER,
+        "right": WD_ALIGN_PARAGRAPH.RIGHT,
+    }[align]
+    pf.first_line_indent = Cm(0)
+    pf.space_before = Pt(0)
+    pf.space_after = Pt(0)
+    pf.line_spacing_rule = WD_LINE_SPACING.SINGLE
+    add_runs(p, text, size=size, bold=bold)
+
+
+def title_block(doc, discipline, variant, theme=None, new_section=False):
+    """Титульный лист по образцу ДГТУ. Азовский филиал заменён на колледж в Ростове-на-Дону."""
+    if new_section:
+        section = doc.add_section(WD_SECTION.NEW_PAGE)
+        _format_title_section(section)
+    else:
+        _format_title_section(doc.sections[-1])
+
+    if os.path.exists(LOGO):
+        p = _paragraph(doc, WD_ALIGN_PARAGRAPH.CENTER, 0, before=0, after=2, spacing=1.0)
+        run = p.add_run()
+        run.add_picture(LOGO, width=Cm(1.7))
+
+    center(doc, "МИНИСТЕРСТВО НАУКИ И ВЫСШЕГО ОБРАЗОВАНИЯ", bold=True, size=12, spacing=1.0)
+    center(doc, "РОССИЙСКОЙ ФЕДЕРАЦИИ", bold=True, size=12, spacing=1.0, before=0)
+    center(doc, "", spacing=1.0)
+    for line in (
         "ФЕДЕРАЛЬНОЕ ГОСУДАРСТВЕННОЕ БЮДЖЕТНОЕ",
         "ОБРАЗОВАТЕЛЬНОЕ УЧРЕЖДЕНИЕ ВЫСШЕГО ОБРАЗОВАНИЯ",
-        "«ДОНСКОЙ ГОСУДАРСТВЕННЫЙ",
-        "ТЕХНИЧЕСКИЙ УНИВЕРСИТЕТ»",
-        "(ДГТУ)",
-        "",
-        "Колледж экономики, управления и права",
-        "",
-        "Специальность 38.02.01",
-        "Экономика и бухгалтерский учёт (по отраслям)",
-        "Заочная форма обучения",
+        "«ДОНСКОЙ ГОСУДАРСТВЕННЫЙ ТЕХНИЧЕСКИЙ УНИВЕРСИТЕТ»",
+        "КОЛЛЕДЖ ЭКОНОМИКИ, УПРАВЛЕНИЯ И ПРАВА",
+    ):
+        center(doc, line, bold=True, size=14, spacing=1.0)
+
+    center(doc, "", spacing=1.0)
+    center(doc, "Заочное отделение", size=12, spacing=1.0)
+    center(doc, "Специальность 38.02.01", size=12, spacing=1.0)
+    center(doc, "«Экономика и бухгалтерский учёт (по отраслям)»", size=12, spacing=1.0)
+
+    center(doc, "", spacing=1.0)
+    center(doc, "КОНТРОЛЬНАЯ РАБОТА", bold=True, size=14, spacing=1.0, before=6)
+    center(doc, "", spacing=1.0)
+
+    rows = [
+        ("Дисциплина", f"«{discipline}»"),
+        ("Номер зачетной книжки", "2621578"),
+        ("Номер варианта", str(variant)),
+        ("Группа", "____________________"),
     ]
-    for line in lines_top:
-        center(
-            doc,
-            line,
-            bold=line.startswith("«ДОНСКОЙ")
-            or line.startswith("ТЕХНИЧЕСКИЙ")
-            or line.startswith("Колледж"),
-            spacing=1.0,
-        )
+    if theme:
+        rows.insert(1, ("Тема", theme))
+    table = doc.add_table(rows=len(rows), cols=2)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _set_table_widths(table, [55, 125])
+    _nil_borders(table)
+    for i, (label, value) in enumerate(rows):
+        _cell(table.rows[i].cells[0], label, size=12, align="left")
+        _cell(table.rows[i].cells[1], value, size=12, bold=True, align="left")
 
     center(doc, "", spacing=1.0)
-    center(doc, "КОНТРОЛЬНАЯ РАБОТА", bold=True, spacing=1.0, before=6)
-    center(doc, f"по дисциплине «{discipline}»", spacing=1.0)
-    center(doc, "", spacing=1.0)
-    for line in subject_lines:
-        center(doc, line, bold=True, spacing=1.0)
+    sign = doc.add_table(rows=4, cols=3)
+    sign.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _set_table_widths(sign, [70, 55, 55])
+    _nil_borders(sign)
+    _cell(sign.rows[0].cells[0], "Обучающийся", size=12)
+    _cell(sign.rows[0].cells[1], "________________", size=12, align="center")
+    _cell(sign.rows[0].cells[2], "В. Кисловская", size=12, align="right")
+    _cell(sign.rows[1].cells[1], "подпись, дата", size=9, align="center")
+    _cell(sign.rows[2].cells[0], "Контрольную работу проверил", size=12)
+    _cell(sign.rows[2].cells[1], "________________", size=12, align="center")
+    _cell(sign.rows[3].cells[1], "подпись, дата", size=9, align="center")
 
     center(doc, "", spacing=1.0)
-    center(doc, "", spacing=1.0)
-    for line in extra_lines:
-        right(doc, line, spacing=1.0)
+    center(doc, "Ростов-на-Дону", size=12, spacing=1.0, before=8)
+    center(doc, "2026", size=12, spacing=1.0)
 
-    # прижать город к низу за счёт пустых строк — их число подбирается так, чтобы лист остался одним
-    for _ in range(2):
-        center(doc, "", spacing=1.0)
-    center(doc, "Ростов-на-Дону", spacing=1.0)
-    center(doc, "2026", spacing=1.0)
-    page_break(doc)
-
-
-STUDENT_LINES = [
-    "Выполнила студентка",
-    "Кисловская Виолетта",
-    "зачётная книжка № 2621578",
-    "курс ______   группа ______",
-    "",
-    "Проверил преподаватель",
-    "________________ / ФИО /",
-    "",
-    "Дата выполнения: 16 ноября 2026 г.",
-]
+    body_section = doc.add_section(WD_SECTION.NEW_PAGE)
+    _format_body_section(body_section)
