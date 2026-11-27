@@ -8,6 +8,7 @@ import shlex
 from pathlib import Path
 from urllib.parse import quote_plus
 
+from agent.browser import PageCleaner
 from agent.tool_runner import ToolRunner
 
 _WANT = re.compile(
@@ -26,9 +27,15 @@ _QUESTIONS = {
 class Wants:
     """Ведёт заказ и задаёт следующий недостающий вопрос."""
 
-    def __init__(self, runner: ToolRunner | None = None, root: str | Path = "home") -> None:
+    def __init__(
+        self,
+        runner: ToolRunner | None = None,
+        root: str | Path = "home",
+        pages: PageCleaner | None = None,
+    ) -> None:
         self.runner = runner or ToolRunner()
         self.root = Path(root)
+        self.pages = pages or PageCleaner()
 
     async def fulfill(self, task: str) -> str | None:
         text = " ".join(task.strip().split())
@@ -79,11 +86,15 @@ class Wants:
         address = str(order["address"])
         phone = str(order["phone"])
         place, url = _place_for(item, city)
-        await self.runner.execute(f"python -m webbrowser -t {shlex.quote(url)}")
+        try:
+            cleared = await self.pages.open_and_clear(url)
+        except Exception:
+            await self.runner.execute(f"python -m webbrowser -t {shlex.quote(url)}")
+            cleared = "Баннеры убрать не удалось, страница открыта."
         self._order_path().unlink(missing_ok=True)
         return (
             f"Заказ: {item}. Город: {city}. Адрес: {address}. Телефон: {phone}. "
-            f"Открываю {place}: {url}"
+            f"Открываю {place}: {url}. {cleared}"
         )
 
     def _order_path(self) -> Path:

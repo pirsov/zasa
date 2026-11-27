@@ -13,7 +13,9 @@ from agent.wants import Wants
 def _wants(tmp_path: Path) -> Wants:
     runner = AsyncMock()
     runner.execute = AsyncMock(return_value=(0, "", ""))
-    return Wants(runner, root=tmp_path / "home")
+    pages = AsyncMock()
+    pages.open_and_clear = AsyncMock(return_value="Убрал: «Крутите колесо».")
+    return Wants(runner, root=tmp_path / "home", pages=pages)
 
 
 @pytest.mark.asyncio
@@ -21,7 +23,7 @@ async def test_pizza_asks_for_the_city_before_any_site(tmp_path: Path) -> None:
     wants = _wants(tmp_path)
     answer = await wants.fulfill("я хочу пиццу")
     assert answer == "Заказываю пиццу. В каком городе доставить? Сам я город не знаю."
-    wants.runner.execute.assert_not_awaited()
+    wants.pages.open_and_clear.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -41,7 +43,9 @@ async def test_order_collects_address_and_phone_then_opens(tmp_path: Path) -> No
     assert "Адрес: улица Ленина, 1" in done
     assert "Телефон: +7 999 123-45-67" in done
     assert "https://papajohns.ru/moscow" in done
-    wants.runner.execute.assert_awaited_once()
+    wants.pages.open_and_clear.assert_awaited_once()
+    assert "https://papajohns.ru/moscow" in wants.pages.open_and_clear.await_args.args[0]
+    assert "Убрал" in done
     assert not (tmp_path / "home" / "order.json").exists()
 
 
@@ -55,9 +59,9 @@ async def test_other_city_does_not_use_moscow(tmp_path: Path) -> None:
     assert done is not None
     assert "Казань" in done
     assert "papajohns.ru/moscow" not in done
-    command = wants.runner.execute.await_args.args[0]
-    assert "yandex.ru/search" in command
-    assert "papajohns" not in command
+    opened = wants.pages.open_and_clear.await_args.args[0]
+    assert "yandex.ru/search" in opened
+    assert "papajohns" not in opened
 
 
 @pytest.mark.asyncio
@@ -69,7 +73,7 @@ async def test_bad_phone_is_asked_again(tmp_path: Path) -> None:
     again = await wants.fulfill("не скажу")
     assert again is not None
     assert "телефон" in again
-    wants.runner.execute.assert_not_awaited()
+    wants.pages.open_and_clear.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -79,12 +83,12 @@ async def test_known_details_are_reused(tmp_path: Path) -> None:
     await wants.fulfill("Москва")
     await wants.fulfill("улица Ленина, 1")
     await wants.fulfill("+7 999 123-45-67")
-    wants.runner.execute.reset_mock()
+    wants.pages.open_and_clear.reset_mock()
     again = await wants.fulfill("я хочу пиццу")
     assert again is not None
     assert "Город: Москва" in again
     assert "https://papajohns.ru/moscow" in again
-    wants.runner.execute.assert_awaited_once()
+    wants.pages.open_and_clear.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -102,4 +106,4 @@ async def test_orchestrator_asks_instead_of_planning(tmp_path: Path) -> None:
     orchestrator.wants = _wants(tmp_path)
     await orchestrator.run("я хочу пиццу")
     orchestrator.planner.create_plan.assert_not_awaited()
-    orchestrator.wants.runner.execute.assert_not_awaited()
+    orchestrator.wants.pages.open_and_clear.assert_not_awaited()

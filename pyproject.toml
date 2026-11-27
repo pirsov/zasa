@@ -15,6 +15,7 @@ dependencies = [
     "structlog",
     "pytest",
     "mcp>=1.0.0",
+    "playwright>=1.65.2",
 ]
 
 [build-system]
