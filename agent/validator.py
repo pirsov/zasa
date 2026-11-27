@@ -1,4 +1,4 @@
-"""Валидатор L1–L3 и безопасное применение EditCommand к файлам."""
+"""Валидатор L1–L4 и безопасное применение EditCommand к файлам."""
 
 from __future__ import annotations
 
@@ -11,6 +11,14 @@ from agent.schema import ActionType, EditCommand, ValidatorError
 
 _SYMBOL_ACTIONS = frozenset(
     {ActionType.replace_symbol, ActionType.insert_after_symbol}
+)
+_BLOCKED_COMMANDS = (
+    "rm -rf /",
+    "mkfs",
+    "dd if=",
+    ":(){ :|:& };:",
+    "shutdown",
+    "reboot",
 )
 
 
@@ -90,6 +98,16 @@ class Validator:
                 hint="Build the command with the EditCommand schema",
             )
 
+        if command.action == ActionType.run_command:
+            blocked = _blocked_command(command.command or "")
+            if blocked is not None:
+                return False, ValidatorError(
+                    level="L4",
+                    message="Dangerous command blocked",
+                    hint=f"Blocked pattern: {blocked}",
+                )
+            return True, None
+
         if command.action != ActionType.write_file and not Path(command.path).is_file():
             return False, ValidatorError(
                 level="L2",
@@ -119,6 +137,14 @@ class Validator:
                 hint="Fix the Python syntax in new_code before applying",
             )
         return True, None
+
+
+def _blocked_command(command: str) -> str | None:
+    folded = " ".join(command.lower().split())
+    for pattern in _BLOCKED_COMMANDS:
+        if pattern in command or pattern in folded:
+            return pattern
+    return None
 
 
 def _find_block(lines: list[str], block: list[str]) -> tuple[int, int] | None:

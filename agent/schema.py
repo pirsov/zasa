@@ -15,6 +15,7 @@ class ActionType(str, Enum):
     write_file = "write_file"
     read_symbol = "read_symbol"
     run_check = "run_check"
+    run_command = "run_command"
 
 
 _ACTIONS_REQUIRING_CODE = frozenset(
@@ -39,6 +40,7 @@ class EditCommand(BaseModel):
     path: str
     symbol: str | None = None
     new_code: str | None = None
+    command: str | None = None
     reason: str
 
     @field_validator("path")
@@ -63,6 +65,11 @@ class EditCommand(BaseModel):
                 "symbol is required when action is "
                 "replace_symbol or insert_after_symbol"
             )
+        if self.action == ActionType.run_command:
+            if self.command is None or not self.command.strip():
+                raise ValueError("command is required when action is run_command")
+        elif self.command is not None:
+            raise ValueError("command must be None unless action is run_command")
         return self
 
 
@@ -129,7 +136,7 @@ class ReplanOp(BaseModel):
 
 
 class ValidatorError(BaseModel):
-    level: Literal["L1", "L2", "L3"]
+    level: Literal["L1", "L2", "L3", "L4"]
     message: str
     hint: str = ""
 

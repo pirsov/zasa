@@ -120,3 +120,27 @@ def test_applier_replace_method_keeps_indent(
     assert path.read_text(encoding="utf-8") == (
         "class Box:\n    def foo(self):\n        return 2\n"
     )
+
+
+def test_l4_dangerous_command() -> None:
+    command = EditCommand(
+        action=ActionType.run_command,
+        path=".",
+        command="rm -rf /",
+        reason="опасная команда",
+    )
+    ok, error = asyncio.run(_validator().validate(command))
+    assert ok is False
+    assert error is not None
+    assert error.level == "L4"
+    assert error.message == "Dangerous command blocked"
+
+
+def test_l4_safe_command() -> None:
+    command = EditCommand(
+        action=ActionType.run_command,
+        path=".",
+        command="ls -la",
+        reason="список файлов",
+    )
+    assert asyncio.run(_validator().validate(command)) == (True, None)

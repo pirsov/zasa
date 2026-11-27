@@ -12,7 +12,8 @@ from agent.config import Settings, get_settings
 from agent.executor import Executor
 from agent.planner import Planner
 from agent.retriever import CodeRetriever
-from agent.schema import ActionType, Plan, PlanStep, ValidatorError
+from agent.schema import ActionType, EditCommand, Plan, PlanStep, ValidatorError
+from agent.tool_runner import ToolRunner
 from agent.validator import Applier, Validator
 
 _SYMBOL_ACTIONS = frozenset(
@@ -39,6 +40,7 @@ class Orchestrator:
         self.executor = Executor(self._settings)
         self.validator = Validator(self.retriever)
         self.applier = Applier(self.retriever)
+        self.tool_runner = ToolRunner()
 
     async def run(self, task: str) -> None:
         plan = await self.planner.create_plan(task)
@@ -105,6 +107,14 @@ class Orchestrator:
                 previous_error,
             )
             success, error = await self.validator.validate(command)
+            if success and (
+                step.action == ActionType.run_command
+                or command.action == ActionType.run_command
+            ):
+                finished, previous_error = await self._run_shell(step, command, attempt, retries)
+                if finished:
+                    return
+                continue
             if success:
                 self.applier.apply(command)
                 self._console.print(
@@ -124,3 +134,46 @@ class Orchestrator:
         raise OrchestratorError(
             f"Шаг {step.id} не выполнен за {retries} попыток"
         )
+
+    async def _run_shell(
+        self,
+        step: PlanStep,
+        command: EditCommand,
+        attempt: int,
+        retries: int,
+    ) -> tuple[bool, ValidatorError | None]:
+        shell = command.command or ""
+        if not shell.strip():
+            error = ValidatorError(
+                level="L1",
+                message="command is required for run_command",
+                hint="Put the shell command in the command field",
+            )
+            self._console.print(
+                f"[red]Шаг {step.id}, попытка {attempt}/{retries}: {error.message}[/red]"
+            )
+            return False, error
+
+        returncode, stdout, stderr = await self.tool_runner.execute(shell)
+        self._print_streams(returncode, stdout, stderr)
+        if returncode == 0:
+            self._console.print(f"[green]Шаг {step.id} выполнен: {shell}[/green]")
+            return True, None
+
+        detail = stderr.strip() or stdout.strip() or "команда завершилась с ошибкой"
+        error = ValidatorError(
+            level="L2",
+            message=f"Command exited with code {returncode}: {detail}",
+            hint="Change the shell command and retry",
+        )
+        self._console.print(
+            f"[red]Шаг {step.id}, попытка {attempt}/{retries}: {error.message}[/red]"
+        )
+        return False, error
+
+    def _print_streams(self, returncode: int, stdout: str, stderr: str) -> None:
+        style = "green" if returncode == 0 else "red"
+        if stdout:
+            self._console.print(stdout, style=style, end="" if stdout.endswith("\n") else "\n")
+        if stderr:
+            self._console.print(stderr, style="red", end="" if stderr.endswith("\n") else "\n")
