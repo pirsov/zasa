@@ -10,6 +10,13 @@ from agent.hands import Hands
 
 
 @pytest.mark.asyncio
+async def test_example_domain_is_not_an_order_page(tmp_path: Path) -> None:
+    hands = Hands(tmp_path)
+    with pytest.raises(Exception, match="не страница заказа"):
+        await hands.call("open_page", {"url": "http://example.com/order-form"})
+
+
+@pytest.mark.asyncio
 async def test_ask_returns_the_question_and_remember_writes_a_note(tmp_path: Path) -> None:
     hands = Hands(tmp_path)
     question = await hands.call("ask", {"text": "В каком городе доставить?"})

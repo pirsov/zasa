@@ -31,7 +31,12 @@ class Hands:
         if tool == "remember":
             return self._remember(_required(args, "text"))
         if tool == "open_page":
-            return await self._open(_required(args, "url"))
+            url = _required(args, "url")
+            if _placeholder_url(url):
+                raise HandsError(
+                    "Это не страница заказа. Нужен живой сайт доставки в названном городе, не example.com."
+                )
+            return await self._open(url)
         if tool == "click":
             return await self._click(_required(args, "text"))
         if tool == "type_text":
@@ -75,7 +80,10 @@ class Hands:
         try:
             await page.goto(url, wait_until="commit", timeout=45000)
         except Exception:
-            await page.goto(url, wait_until="commit", timeout=45000)
+            try:
+                await page.goto(url, wait_until="commit", timeout=45000)
+            except Exception as exc:
+                raise HandsError(f"Страница не открылась: {url}. {exc}") from exc
         try:
             await page.wait_for_function(_HAS_OVERLAY, timeout=2000)
         except Exception:
@@ -123,6 +131,11 @@ class Hands:
         if self._page is None:
             raise HandsError("Страница ещё не открыта.")
         return self._page
+
+
+def _placeholder_url(url: str) -> bool:
+    host = url.lower()
+    return "example.com" in host or "example.org" in host or "example.net" in host
 
 
 def _required(arguments: dict[str, Any], key: str) -> str:

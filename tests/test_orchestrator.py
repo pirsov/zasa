@@ -235,6 +235,33 @@ async def test_ask_action_waits_for_the_missing_fact(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_known_facts_are_not_asked_again(tmp_path: Path) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    orchestrator.memory.save_fact("Человек: улица Ленина, дом 17")
+    orchestrator.memory.save_fact("Человек: 89991234567")
+    orchestrator.memory.save_fact("Человек: Подтверждаю")
+    orchestrator.planner.create_plan = AsyncMock(
+        return_value=Plan(
+            goal="оформить",
+            steps=[
+                PlanStep(id=1, action=ActionType.ask, note="Введите ваш номер телефона"),
+                PlanStep(id=2, action=ActionType.run_check, depends_on=[1], note="дальше"),
+            ],
+        )
+    )
+    orchestrator.validator.validate = AsyncMock(return_value=(True, None))
+    orchestrator.executor.generate_edit_command = AsyncMock(
+        return_value=EditCommand(action=ActionType.run_check, reason="проверка")
+    )
+
+    await orchestrator.run("Подтверждаю")
+
+    facts = orchestrator.memory.load()
+    assert not any("номер телефона" in fact for fact in facts)
+    orchestrator.executor.generate_edit_command.assert_awaited()
+
+
+@pytest.mark.asyncio
 async def test_echo_question_waits_for_the_person(tmp_path: Path) -> None:
     orchestrator = _orchestrator(tmp_path)
     orchestrator.validator.validate = AsyncMock(return_value=(True, None))

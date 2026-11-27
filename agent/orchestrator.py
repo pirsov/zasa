@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -34,6 +35,24 @@ _SYMBOL_ACTIONS = frozenset(
 
 class OrchestratorError(RuntimeError):
     """План остановлен: шаг не выполнен или зависимость не готова."""
+
+
+def _ask_repeats_known_fact(step: PlanStep, memory: str) -> bool:
+    """Не спрашивать факт, который человек уже назвал."""
+    note = (step.note or "").lower()
+    if any(word in note for word in ("адрес", "улиц", "дом")) and re.search(
+        r"дом\s*\d+", memory, re.IGNORECASE
+    ):
+        return True
+    if "телефон" in note and re.search(
+        r"(?<!\d)(?:\+7|8)\d{10}(?!\d)|(?<!\d)\d{10}(?!\d)", memory
+    ):
+        return True
+    if "подтверд" in note and re.search(
+        r"подтверждаю|подтверди\b|подтвердить", memory, re.IGNORECASE
+    ):
+        return True
+    return False
 
 
 def _question_from_step(step: PlanStep) -> str:
@@ -159,6 +178,13 @@ class Orchestrator:
         replans = 0
         while index < len(plan.steps):
             step = plan.steps[index]
+            if step.action == ActionType.ask and _ask_repeats_known_fact(
+                step, "\n".join(self.memory.load())
+            ):
+                done.add(step.id)
+                self._progress.append(f"Уже известно: {step.note or step.symbol}")
+                index += 1
+                continue
             if step.action == ActionType.ask:
                 self._ask(_question_from_step(step))
                 return

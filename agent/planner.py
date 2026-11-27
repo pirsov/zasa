@@ -51,6 +51,7 @@ class Planner:
                         "messages": messages,
                         "format": "json",
                         "stream": False,
+                        "options": {"num_predict": 400},
                     },
                 )
                 response.raise_for_status()
