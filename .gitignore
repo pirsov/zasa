@@ -3,6 +3,8 @@ venv/
 .env
 plans/*.json
 !plans/.gitkeep
+home/*
+!home/.gitkeep
 logs/*
 !logs/.gitkeep
 __pycache__/

@@ -10,6 +10,7 @@ from rich.console import Console
 
 from agent.config import Settings, get_settings
 from agent.executor import EditCommandGenerationError, Executor
+from agent.household import Household
 from agent.mcp_client import McpClient, McpClientError
 from agent.memory import MemoryManager
 from agent.planner import Planner
@@ -48,10 +49,16 @@ class Orchestrator:
         self.tool_runner = ToolRunner()
         self.mcp = McpClient()
         self.memory = MemoryManager("plans/memory.json")
+        self.household = Household("home", self.memory, self.tool_runner)
         self.replanner = Replanner(self._settings)
 
     async def run(self, task: str) -> None:
         try:
+            answer = await self.household.handle(task)
+            if answer is not None:
+                self._console.print(answer)
+                self.memory.save_fact(f"Успешно выполнена задача: {task}")
+                return
             memory_ctx = self.memory.get_context()
             servers = ", ".join(self.mcp.load_config().mcp_servers)
             plan = await self.planner.create_plan(

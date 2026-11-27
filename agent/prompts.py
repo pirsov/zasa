@@ -12,7 +12,10 @@ RULES:
 4. Use "run_check" to run tests or linters between changes.
 5. Use "run_command" to execute a shell command. The executor puts the exact command in the "command" field.
 6. Use "call_mcp" to call a tool on a configured MCP server. Configured servers: {{mcp_servers}}.
-7. depends_on must contain valid step IDs.
+7. The user states an idea, not a procedure. You choose the files, commands, and steps. Do not expect the user to name an action.
+8. Notes, lists, and drafts belong under home/. Code edits stay in the repository. Prefer one write_file or one run_command when that fully does the idea.
+9. symbol is only the function or class name, never a line of source. write_file replaces the whole file, so keep every function that must remain.
+10. depends_on must contain valid step IDs.
 
 TASK: {{task}}
 REPO MAP (available files and symbols): {{repo_map}}

@@ -10,6 +10,7 @@ import pytest
 
 from agent.config import Settings
 from agent.executor import EditCommandGenerationError
+from agent.household import Household
 from agent.memory import MemoryManager
 from agent.orchestrator import Orchestrator, OrchestratorError
 from agent.schema import ActionType, EditCommand, Plan, PlanStep, ReplanOp, ValidatorError
@@ -61,8 +62,22 @@ def _orchestrator(tmp_path: Path, retries: int = 3) -> Orchestrator:
     orchestrator.executor.generate_edit_command = AsyncMock(return_value=_COMMAND)
     orchestrator.applier.apply = MagicMock()
     orchestrator.memory = MemoryManager(tmp_path / "plans" / "memory.json")
+    orchestrator.household = Household(
+        tmp_path / "home",
+        orchestrator.memory,
+        orchestrator.tool_runner,
+    )
     orchestrator.replanner.replan = AsyncMock(side_effect=OrchestratorError("replan failed"))
     return orchestrator
+
+
+@pytest.mark.asyncio
+async def test_household_idea_skips_planner(tmp_path: Path) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    await orchestrator.run("запомни купить молоко")
+    orchestrator.planner.create_plan.assert_not_awaited()
+    assert "купить молоко" in (tmp_path / "home" / "notes.md").read_text(encoding="utf-8")
+    assert any("молоко" in fact for fact in orchestrator.memory.load())
 
 
 @pytest.mark.asyncio
