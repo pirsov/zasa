@@ -53,7 +53,7 @@ class Orchestrator:
         self.memory = MemoryManager("plans/memory.json")
         self.household = Household("home", self.memory, self.tool_runner)
         self.outcomes = Outcomes()
-        self.wants = Wants(self.tool_runner)
+        self.wants = Wants(self.tool_runner, root="home")
         self.replanner = Replanner(self._settings)
 
     async def run(self, task: str) -> None:
