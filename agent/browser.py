@@ -117,47 +117,84 @@ class PageCleaner:
         *,
         confirm: bool = False,
         phone: str = "",
+        code: str = "",
+        storage: str | Path | None = None,
+        name: str = "",
+        email: str = "",
     ) -> str:
-        """Кладёт блюдо в корзину. Кнопку оформления нажимает только при confirm."""
+        """Кладёт блюдо в корзину. Код из смс вводит в той же сессии сайта."""
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(
                 executable_path=self.executable,
                 headless=True,
                 args=["--no-sandbox", "--disable-dev-shm-usage"],
             )
+            context_args: dict[str, object] = {"viewport": {"width": 1400, "height": 1100}}
+            if code and storage is not None and Path(storage).is_file():
+                context_args["storage_state"] = str(storage)
+            context = await browser.new_context(**context_args)  # type: ignore[arg-type]
             try:
-                page = await browser.new_page(viewport={"width": 1400, "height": 1100})
-                try:
-                    await page.goto(_menu_url(url), wait_until="commit", timeout=45000)
-                except Exception:
-                    await page.goto(_menu_url(url), wait_until="commit", timeout=45000)
-                await page.wait_for_timeout(800)
-                try:
-                    await page.wait_for_function(_HAS_OVERLAY, timeout=4000)
-                except Exception:
-                    pass
-                await _clear(page)
-                added = await page.evaluate(_ADD_PRODUCT, product)
-                if not added:
-                    return f"Не нашёл «{product}» на странице. Кнопку оформления не нажимал."
-                await page.wait_for_timeout(800)
-                await page.locator("a[href*='order']").first.click(timeout=8000)
-                await page.wait_for_timeout(800)
-                chosen = await _fill_address(page, address)
-                if not confirm:
-                    if screenshot is not None:
-                        await page.evaluate("() => window.scrollTo(0, 0)")
-                        await page.screenshot(path=str(screenshot), full_page=False)
-                    return (
-                        f"В корзине {product}. Адрес: {chosen}. "
-                        "Кнопку «Оформить заказ» не нажимал."
-                    )
-                outcome = await _confirm_order(page, phone, product)
+                page = await context.new_page()
+                if code:
+                    target = _stored_url(storage) or _menu_url(url)
+                    await _goto(page, target)
+                    outcome = await _submit_code(page, code)
+                    chosen = address
+                else:
+                    await _goto(page, _menu_url(url))
+                    await page.wait_for_timeout(800)
+                    try:
+                        await page.wait_for_function(_HAS_OVERLAY, timeout=4000)
+                    except Exception:
+                        pass
+                    await _clear(page)
+                    added = await page.evaluate(_ADD_PRODUCT, product)
+                    if not added:
+                        return f"Не нашёл «{product}» на странице. Кнопку оформления не нажимал."
+                    await page.wait_for_timeout(800)
+                    await page.locator("a[href*='order']").first.click(timeout=8000)
+                    await page.wait_for_timeout(800)
+                    chosen = await _fill_address(page, address)
+                    if not confirm:
+                        if screenshot is not None:
+                            await page.evaluate("() => window.scrollTo(0, 0)")
+                            await page.screenshot(path=str(screenshot), full_page=False)
+                        return (
+                            f"В корзине {product}. Адрес: {chosen}. "
+                            "Кнопку «Оформить заказ» не нажимал."
+                        )
+                    outcome = await _confirm_order(page, phone, product, name, email)
+                    if storage is not None and "Код отправлен" in outcome:
+                        await _save_session(context, page, storage)
                 if screenshot is not None:
                     await page.screenshot(path=str(screenshot), full_page=False)
             finally:
+                await context.close()
                 await browser.close()
         return f"В корзине {product}. Адрес: {chosen}. {outcome}"
+
+
+async def _goto(page: object, url: str) -> None:
+    try:
+        await page.goto(url, wait_until="commit", timeout=45000)  # type: ignore[attr-defined]
+    except Exception:
+        await page.goto(url, wait_until="commit", timeout=45000)  # type: ignore[attr-defined]
+
+
+def _stored_url(storage: str | Path | None) -> str:
+    if storage is None:
+        return ""
+    path = Path(str(storage) + ".url")
+    if not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8").strip()
+
+
+async def _save_session(context: object, page: object, storage: str | Path) -> None:
+    path = Path(storage)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    await context.storage_state(path=str(path))  # type: ignore[attr-defined]
+    Path(str(path) + ".url").write_text(page.url, encoding="utf-8")  # type: ignore[attr-defined]
 
 
 def _menu_url(url: str) -> str:
@@ -261,9 +298,9 @@ _SUBMIT_BUTTON = """
 """
 
 
-async def _confirm_order(page: object, phone: str, product: str) -> str:
-    for name in ("private_policy_state", "personal_data_agreement_state"):
-        box = page.locator(f"input[name='{name}']")  # type: ignore[attr-defined]
+async def _confirm_order(page: object, phone: str, product: str, name: str, email: str) -> str:
+    for agreement in ("private_policy_state", "personal_data_agreement_state"):
+        box = page.locator(f"input[name='{agreement}']")  # type: ignore[attr-defined]
         if await box.count():  # type: ignore[attr-defined]
             await box.first.check(force=True)  # type: ignore[attr-defined]
     if phone:
@@ -281,12 +318,7 @@ async def _confirm_order(page: object, phone: str, product: str) -> str:
     await page.wait_for_timeout(1500)  # type: ignore[attr-defined]
     text, paid = await _page_reply(page)
     if _needs_sms(text):
-        if phone:
-            await _type_masked_phone(page, phone)
-        return (
-            f"{note}Кнопку «Оформить заказ» нажал. "
-            "Сайт просит имя, почту и код из смс. Код не отправлял, заказ ещё не размещён."
-        )
+        return note + await _send_sms(page, phone, name, email)
     filled = await _fill_phone(page, phone) if phone else False
     if filled and not paid and not _order_placed(text) and await button.count():  # type: ignore[attr-defined]
         try:
@@ -296,11 +328,74 @@ async def _confirm_order(page: object, phone: str, product: str) -> str:
         except Exception:
             text, paid = await _page_reply(page)
     snippet = _site_snippet(text)
-    if paid or _order_placed(text):
-        cancelled = await _cancel_order(page)
-        tail = " Заказ на сайте отменил." if cancelled else ""
-        return f"{note}Кнопку «Оформить заказ» нажал. Сайт ответил: {snippet}{tail}"
     return f"{note}Кнопку «Оформить заказ» нажал. Сайт ответил: {snippet}"
+
+
+async def _send_sms(page: object, phone: str, name: str, email: str) -> str:
+    await _fill_named(page, "username", name)
+    await _fill_named(page, "email", email)
+    if phone:
+        await _type_masked_phone(page, phone)
+    send = page.locator("button").filter(has_text="Отправить код")  # type: ignore[attr-defined]
+    if await send.count() == 0:  # type: ignore[attr-defined]
+        return "Сайт просит код из смс, кнопки отправки нет."
+    if await send.first.is_disabled():  # type: ignore[attr-defined]
+        return "Сайт просит имя и почту, без них код не уходит."
+    await send.first.click()  # type: ignore[attr-defined]
+    field = page.locator("input[name='phonecode']")  # type: ignore[attr-defined]
+    for _ in range(20):
+        if await field.count() and not await field.first.is_disabled():  # type: ignore[attr-defined]
+            return f"Код отправлен на {phone}. Пришлите цифры из смс."
+        await page.wait_for_timeout(300)  # type: ignore[attr-defined]
+    return "Код не ушёл: сайт не открыл поле."
+
+
+async def _fill_named(page: object, field_name: str, value: str) -> None:
+    if not value:
+        return
+    field = page.locator(f"input[name='{field_name}']")  # type: ignore[attr-defined]
+    if await field.count():  # type: ignore[attr-defined]
+        await field.first.fill(value)  # type: ignore[attr-defined]
+
+
+async def _submit_code(page: object, code: str) -> str:
+    field = page.locator("input[name='phonecode']")  # type: ignore[attr-defined]
+    if await field.count() == 0 or not await field.first.is_visible():  # type: ignore[attr-defined]
+        opener = page.locator("button").filter(has_text="Оформить заказ")  # type: ignore[attr-defined]
+        if await opener.count():  # type: ignore[attr-defined]
+            await opener.first.click()  # type: ignore[attr-defined]
+            await page.wait_for_timeout(500)  # type: ignore[attr-defined]
+    if await field.count() == 0:  # type: ignore[attr-defined]
+        return "Поля для кода на странице нет."
+    if await field.first.is_disabled():  # type: ignore[attr-defined]
+        return "Поле кода закрыто: сессия сайта не сохранилась. Код не вводил."
+    await field.first.click()  # type: ignore[attr-defined]
+    await field.first.press_sequentially(code, delay=30)  # type: ignore[attr-defined]
+    await page.wait_for_timeout(200)  # type: ignore[attr-defined]
+    if not await _click_wide_order(page):
+        return "Кнопка оформления после кода неактивна."
+    await page.wait_for_timeout(1500)  # type: ignore[attr-defined]
+    text, _paid = await _page_reply(page)
+    return f"Код ввёл. Кнопку «Оформить заказ» нажал. Сайт ответил: {_site_snippet(text)}"
+
+
+async def _click_wide_order(page: object) -> bool:
+    buttons = page.locator("button").filter(has_text="Оформить заказ")  # type: ignore[attr-defined]
+    best = None
+    best_width = -1.0
+    for index in range(await buttons.count()):  # type: ignore[attr-defined]
+        item = buttons.nth(index)  # type: ignore[attr-defined]
+        if await item.is_disabled():  # type: ignore[attr-defined]
+            continue
+        box = await item.bounding_box()  # type: ignore[attr-defined]
+        width = float(box["width"]) if box else 0.0
+        if width >= best_width:
+            best_width = width
+            best = item
+    if best is None:
+        return False
+    await best.click()  # type: ignore[attr-defined]
+    return True
 
 
 async def _page_reply(page: object) -> tuple[str, bool]:
@@ -404,19 +499,6 @@ _BUMP_QUANTITY = """
 async def _bump_quantity(page: object, product: str) -> bool:
     clicked = await page.evaluate(_BUMP_QUANTITY, product)  # type: ignore[attr-defined]
     return bool(clicked)
-
-
-async def _cancel_order(page: object) -> bool:
-    button = page.locator("button, a").filter(has_text="Отменить заказ")  # type: ignore[attr-defined]
-    if await button.count() == 0:  # type: ignore[attr-defined]
-        return False
-    await button.first.click()  # type: ignore[attr-defined]
-    await page.wait_for_timeout(800)  # type: ignore[attr-defined]
-    confirm = page.locator("button").filter(has_text="Отменить")  # type: ignore[attr-defined]
-    if await confirm.count():  # type: ignore[attr-defined]
-        await confirm.first.click()  # type: ignore[attr-defined]
-        await page.wait_for_timeout(800)  # type: ignore[attr-defined]
-    return True
 
 
 async def _wait_until_submittable(page: object) -> str | None:

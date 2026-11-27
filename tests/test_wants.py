@@ -67,11 +67,41 @@ async def test_confirmation_presses_the_order_button(tmp_path: Path) -> None:
     await wants.fulfill("улица Ленина, 1")
     await wants.fulfill("+7 999 123-45-67")
     wants.pages.reach_order.reset_mock()
-    answer = await wants.fulfill("подтверди")
+    asked = await wants.fulfill("подтверди")
+    assert asked is not None
+    assert "имя" in asked.casefold()
+    wants.pages.reach_order.assert_not_awaited()
+    await wants.fulfill("Анна")
+    answer = await wants.fulfill("anna@example.com")
     assert answer is not None
     wants.pages.reach_order.assert_awaited_once()
     assert wants.pages.reach_order.await_args.kwargs["confirm"] is True
     assert wants.pages.reach_order.await_args.kwargs["phone"] == "+7 999 123-45-67"
+    assert wants.pages.reach_order.await_args.kwargs["name"] == "Анна"
+    assert wants.pages.reach_order.await_args.kwargs["email"] == "anna@example.com"
+    assert not (tmp_path / "home" / "order.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_sms_code_goes_back_to_the_same_order(tmp_path: Path) -> None:
+    wants = _wants(tmp_path)
+    wants.pages.reach_order.return_value = "Код отправлен на +7 999 123-45-67. Пришлите цифры из смс."
+    await wants.fulfill("я хочу пиццу")
+    await wants.fulfill("Москва")
+    await wants.fulfill("улица Ленина, 1")
+    await wants.fulfill("+7 999 123-45-67")
+    await wants.fulfill("подтверди")
+    await wants.fulfill("Анна")
+    sent = await wants.fulfill("anna@example.com")
+    assert sent is not None
+    assert "Код отправлен" in sent
+    saved = (tmp_path / "home" / "order.json").read_text(encoding="utf-8")
+    assert "awaiting_code" in saved
+    wants.pages.reach_order.reset_mock()
+    wants.pages.reach_order.return_value = "Код ввёл. Кнопку «Оформить заказ» нажал. Сайт ответил: Заказ оформлен"
+    done = await wants.fulfill("4691")
+    assert done is not None
+    assert wants.pages.reach_order.await_args.kwargs["code"] == "4691"
     assert not (tmp_path / "home" / "order.json").exists()
 
 
