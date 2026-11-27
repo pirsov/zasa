@@ -1,0 +1,42 @@
+[project]
+name = "jarvis"
+version = "0.1.0"
+description = "Локальный AI-агент «Джарвис»"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2",
+    "pydantic-settings",
+    "httpx",
+    "tree-sitter",
+    "tree-sitter-language-pack",
+    "python-dotenv",
+    "rich",
+    "structlog",
+    "pytest",
+    "mcp>=1.0.0",
+    "playwright>=1.65.2",
+]
+
+[project.scripts]
+jarvis = "agent.main:main"
+jarvis-desk = "agent.desk:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[dependency-groups]
+dev = [
+    "pytest-asyncio>=1.5.0",
+    "respx>=0.23.1",
+]
