@@ -148,16 +148,84 @@ async def test_run_retry_logic(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_fail_after_max_retries(tmp_path: Path) -> None:
+async def test_stuck_step_asks_instead_of_stopping(tmp_path: Path) -> None:
     retries = 3
     orchestrator = _orchestrator(tmp_path, retries)
     orchestrator.validator.validate = AsyncMock(return_value=(False, _ERROR))
 
-    with pytest.raises(OrchestratorError):
-        await orchestrator.run("сделать два шага")
+    await orchestrator.run("сделать два шага")
 
     assert orchestrator.executor.generate_edit_command.await_count == retries
     assert orchestrator.applier.apply.call_count == 0
+    assert any("Агент:" in fact and "ограничение" in fact for fact in orchestrator.memory.load())
+    assert not any(fact.startswith("Успешно") for fact in orchestrator.memory.load())
+
+
+@pytest.mark.asyncio
+async def test_unfinished_plan_continues(tmp_path: Path) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    orchestrator.validator.validate = AsyncMock(return_value=(True, None))
+    orchestrator.executor.generate_edit_command = AsyncMock(
+        return_value=EditCommand(
+            action=ActionType.run_check,
+            reason="проверка",
+        )
+    )
+    orchestrator.planner.create_plan = AsyncMock(
+        side_effect=[
+            Plan(
+                goal="часть",
+                needs_split=True,
+                steps=[PlanStep(id=1, action=ActionType.run_check, note="первая часть")],
+            ),
+            Plan(
+                goal="остаток",
+                steps=[PlanStep(id=1, action=ActionType.run_check, note="конец")],
+            ),
+        ]
+    )
+
+    await orchestrator.run("большая задача")
+
+    assert orchestrator.planner.create_plan.await_count == 2
+    followup = orchestrator.planner.create_plan.await_args_list[1].kwargs["memory_ctx"]
+    assert "первая часть" in followup
+    assert "Продолжай до результата" in followup
+    saved = list(Path(orchestrator._settings.plans_dir).glob("plan_*.json"))
+    assert len(saved) == 2
+
+
+@pytest.mark.asyncio
+async def test_ask_stops_until_the_person_answers(tmp_path: Path) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    orchestrator.planner.create_plan = AsyncMock(
+        return_value=Plan(
+            goal="узнать адрес",
+            needs_split=True,
+            steps=[
+                PlanStep(id=1, action=ActionType.call_mcp, note="спросить адрес"),
+                PlanStep(id=2, action=ActionType.run_check, depends_on=[1], note="дальше"),
+            ],
+        )
+    )
+    orchestrator.executor.generate_edit_command = AsyncMock(
+        return_value=EditCommand(
+            action=ActionType.call_mcp,
+            path=".",
+            mcp_server="hands",
+            tool_name="ask",
+            tool_arguments={"text": "Какой адрес?"},
+            reason="нет адреса",
+        )
+    )
+
+    await orchestrator.run("довези пиццу")
+
+    assert orchestrator.executor.generate_edit_command.await_count == 1
+    assert orchestrator.planner.create_plan.await_count == 1
+    facts = orchestrator.memory.load()
+    assert "Агент: Какой адрес?" in facts
+    assert not any(fact.startswith("Успешно") for fact in facts)
 
 
 @pytest.mark.asyncio

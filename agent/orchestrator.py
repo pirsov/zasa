@@ -21,6 +21,7 @@ from agent.tool_runner import ToolRunner
 from agent.validator import Applier, Validator
 
 _MAX_REPLANS = 3
+_MAX_PLANS = 6
 
 _SYMBOL_ACTIONS = frozenset(
     {
@@ -33,6 +34,15 @@ _SYMBOL_ACTIONS = frozenset(
 
 class OrchestratorError(RuntimeError):
     """План остановлен: шаг не выполнен или зависимость не готова."""
+
+
+def _blocker_question(step: PlanStep, reason: str) -> str:
+    label = step.note or step.action.value
+    return (
+        "Чтобы закончить, не хватает данных. "
+        f"Шаг «{label}» упёрся в ограничение: {reason}. "
+        "Напишите, чего не хватает."
+    )
 
 
 class Orchestrator:
@@ -53,22 +63,51 @@ class Orchestrator:
         self.replanner = Replanner(self._settings)
 
     async def run(self, task: str) -> None:
+        self._waiting_for_person = False
+        self._progress: list[str] = []
         try:
             self.memory.save_fact(f"Человек: {task}")
-            memory_ctx = self.memory.get_context(max_facts=20)
             servers = ", ".join(["hands", *self.mcp.load_config().mcp_servers])
-            plan = await self.planner.create_plan(
-                task,
-                mcp_servers=servers,
-                memory_ctx=memory_ctx,
+            for _round in range(_MAX_PLANS):
+                plan = await self.planner.create_plan(
+                    task,
+                    mcp_servers=servers,
+                    memory_ctx=self._memory_for_plan(),
+                )
+                self._save_plan(plan)
+                self._print_plan(plan)
+                await self._run_steps(plan)
+                if self._waiting_for_person:
+                    return
+                if not plan.needs_split:
+                    self.memory.save_fact(f"Успешно выполнена задача: {task}")
+                    return
+                self._progress.append("Часть плана выполнена, результат ещё не готов.")
+                self._console.print("[yellow]Результат ещё не готов. Продолжаю.[/yellow]")
+            self._ask(
+                "Я сделал несколько подходов и упёрся в ограничение. "
+                "Напишите, чего не хватает, чтобы закончить."
             )
-            self._save_plan(plan)
-            self._print_plan(plan)
-            await self._run_steps(plan)
-            self.memory.save_fact(f"Успешно выполнена задача: {task}")
         finally:
             await self.hands.close()
             await self.mcp.close()
+
+    def _memory_for_plan(self) -> str:
+        ctx = self.memory.get_context(max_facts=20)
+        if not self._progress:
+            return ctx
+        done = "\n".join(self._progress)
+        extra = (
+            f"Уже сделано в этом запуске:\n{done}\n"
+            "Продолжай до результата. Не повторяй сделанное. "
+            "Спроси только если без данных человека дальше нельзя."
+        )
+        return f"{ctx}\n{extra}" if ctx else extra
+
+    def _ask(self, question: str) -> None:
+        self._console.print(question, style="green")
+        self.memory.save_fact(f"Агент: {question}")
+        self._waiting_for_person = True
 
     def _save_plan(self, plan: Plan) -> Path:
         directory = Path(self._settings.plans_dir)
@@ -86,18 +125,30 @@ class Orchestrator:
         replans = 0
         while index < len(plan.steps):
             step = plan.steps[index]
-            self._ensure_dependencies(step, done)
+            pending = [dep for dep in step.depends_on if dep not in done]
+            if pending:
+                self._ask(
+                    f"Шаг {step.id} зависит от невыполненных шагов {pending}. "
+                    "Напишите, чего не хватает, чтобы закончить без них."
+                )
+                return
             context, previous_error = self._context_for(step)
             error = await self._execute_step(plan.goal, step, context, previous_error)
             if error is None:
                 done.add(step.id)
+                self._progress.append(f"Готово: {step.note or step.action.value}")
+                if self._waiting_for_person:
+                    return
                 index += 1
                 continue
             if replans >= _MAX_REPLANS:
-                raise OrchestratorError(
-                    f"Шаг {step.id} не выполнен, репланнер исчерпал попытки"
-                )
-            operation = await self.replanner.replan(plan, step, error)
+                self._ask(_blocker_question(step, error.message))
+                return
+            try:
+                operation = await self.replanner.replan(plan, step, error)
+            except Exception as exc:
+                self._ask(_blocker_question(step, str(exc)))
+                return
             index = self._apply_replan(plan, index, operation)
             replans += 1
             self._console.print(
@@ -129,13 +180,6 @@ class Orchestrator:
     def _print_plan(self, plan: Plan) -> None:
         self._console.print(f"[bold]План:[/bold] {plan.goal}")
         self._console.print_json(data=plan.model_dump(mode="json"))
-
-    def _ensure_dependencies(self, step: PlanStep, done: set[int]) -> None:
-        pending = [dep for dep in step.depends_on if dep not in done]
-        if pending:
-            raise OrchestratorError(
-                f"Шаг {step.id} зависит от невыполненных шагов: {pending}"
-            )
 
     def _context_for(self, step: PlanStep) -> tuple[str, ValidatorError | None]:
         if step.action == ActionType.write_file:
@@ -268,6 +312,7 @@ class Orchestrator:
                 text = await self.hands.call(tool, command.tool_arguments)
                 if tool == "ask":
                     self.memory.save_fact(f"Агент: {text}")
+                    self._waiting_for_person = True
             else:
                 text = await self.mcp.call_tool(server, tool, command.tool_arguments)
         except (McpClientError, HandsError) as exc:

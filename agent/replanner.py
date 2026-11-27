@@ -33,7 +33,7 @@ class Replanner:
         system_prompt = _render_system_prompt(plan, failed_step, error)
         messages: list[dict[str, str]] = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": "Output the ReplanOp JSON."},
+            {"role": "user", "content": "Выведи JSON операции ReplanOp."},
         ]
         url = f"{self._settings.ollama_base_url.rstrip('/')}/api/chat"
         last_error = "модель не вернула операцию"
