@@ -61,9 +61,9 @@ class Planner:
                         {
                             "role": "user",
                             "content": (
-                                "The previous JSON does not match the Plan schema. "
-                                f"Validation error:\n{last_error}\n"
-                                "Fix the JSON and output ONLY a valid JSON object."
+                                "Прошлый JSON не совпал со схемой Plan. "
+                                f"Ошибка проверки:\n{last_error}\n"
+                                "Исправь JSON и выведи только корректный JSON-объект."
                             ),
                         }
                     )

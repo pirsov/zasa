@@ -60,9 +60,9 @@ class Replanner:
                         {
                             "role": "user",
                             "content": (
-                                "The previous JSON does not match the ReplanOp schema. "
-                                f"Validation error:\n{last_error}\n"
-                                "Fix the JSON and output ONLY a valid JSON object."
+                                "Прошлый JSON не совпал со схемой ReplanOp. "
+                                f"Ошибка проверки:\n{last_error}\n"
+                                "Исправь JSON и выведи только корректный JSON-объект."
                             ),
                         }
                     )

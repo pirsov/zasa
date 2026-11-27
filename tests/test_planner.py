@@ -98,7 +98,7 @@ def test_create_plan_retry() -> None:
         "assistant",
         "user",
     ]
-    assert "Validation error" in retry_payload["messages"][-1]["content"]
+    assert "Ошибка проверки" in retry_payload["messages"][-1]["content"]
 
 
 def test_create_plan_failure() -> None:

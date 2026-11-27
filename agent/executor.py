@@ -67,9 +67,9 @@ class Executor:
                         {
                             "role": "user",
                             "content": (
-                                "The previous JSON does not match the EditCommand schema. "
-                                f"Validation error:\n{last_error}\n"
-                                "Fix the JSON and output ONLY a valid JSON object."
+                                "Прошлый JSON не совпал со схемой EditCommand. "
+                                f"Ошибка проверки:\n{last_error}\n"
+                                "Исправь JSON и выведи только корректный JSON-объект."
                             ),
                         }
                     )
@@ -84,8 +84,8 @@ def _previous_error_text(previous_error: ValidatorError | None) -> str:
     if previous_error is None:
         return ""
     return (
-        "PREVIOUS ATTEMPT FAILED WITH ERROR: "
-        f"{previous_error.level} - {previous_error.message}. HINT: {previous_error.hint}"
+        "Прошлая попытка не удалась: "
+        f"{previous_error.level} — {previous_error.message}. Подсказка: {previous_error.hint}"
     )
 
 

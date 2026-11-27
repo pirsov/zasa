@@ -104,7 +104,7 @@ def test_execute_with_previous_error() -> None:
     payload = json.loads(route.calls[0].request.content)
     system_prompt = payload["messages"][0]["content"]
     assert (
-        "PREVIOUS ATTEMPT FAILED WITH ERROR: L2 - символ не найден. HINT: проверь имя"
+        "Прошлая попытка не удалась: L2 — символ не найден. Подсказка: проверь имя"
         in system_prompt
     )
 
@@ -125,5 +125,5 @@ def test_execute_invalid_json() -> None:
     assert route.call_count == 3
     retry = json.loads(route.calls[1].request.content)
     assert retry["format"] == "json"
-    assert "Validation error" in retry["messages"][-1]["content"]
+    assert "Ошибка проверки" in retry["messages"][-1]["content"]
     assert "path" in retry["messages"][-1]["content"]
