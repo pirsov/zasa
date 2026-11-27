@@ -18,6 +18,10 @@ dependencies = [
     "playwright>=1.65.2",
 ]
 
+[project.scripts]
+jarvis = "agent.main:main"
+jarvis-desk = "agent.desk:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
