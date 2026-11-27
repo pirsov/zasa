@@ -15,6 +15,9 @@ def _wants(tmp_path: Path) -> Wants:
     runner.execute = AsyncMock(return_value=(0, "", ""))
     pages = AsyncMock()
     pages.open_and_clear = AsyncMock(return_value="Убрал: «Крутите колесо».")
+    pages.reach_order = AsyncMock(
+        return_value="В корзине Пепперони. Кнопку «Оформить заказ» не нажимал."
+    )
     return Wants(runner, root=tmp_path / "home", pages=pages)
 
 
@@ -43,9 +46,13 @@ async def test_order_collects_address_and_phone_then_opens(tmp_path: Path) -> No
     assert "Адрес: улица Ленина, 1" in done
     assert "Телефон: +7 999 123-45-67" in done
     assert "https://papajohns.ru/moscow" in done
-    wants.pages.open_and_clear.assert_awaited_once()
-    assert "https://papajohns.ru/moscow" in wants.pages.open_and_clear.await_args.args[0]
-    assert "Убрал" in done
+    wants.pages.reach_order.assert_awaited_once()
+    assert wants.pages.reach_order.await_args.args[:3] == (
+        "https://papajohns.ru/moscow",
+        "Пепперони",
+        "улица Ленина, 1",
+    )
+    assert "не нажимал" in done
     assert not (tmp_path / "home" / "order.json").exists()
 
 
@@ -83,12 +90,12 @@ async def test_known_details_are_reused(tmp_path: Path) -> None:
     await wants.fulfill("Москва")
     await wants.fulfill("улица Ленина, 1")
     await wants.fulfill("+7 999 123-45-67")
-    wants.pages.open_and_clear.reset_mock()
+    wants.pages.reach_order.reset_mock()
     again = await wants.fulfill("я хочу пиццу")
     assert again is not None
     assert "Город: Москва" in again
     assert "https://papajohns.ru/moscow" in again
-    wants.pages.open_and_clear.assert_awaited_once()
+    wants.pages.reach_order.assert_awaited_once()
 
 
 @pytest.mark.asyncio

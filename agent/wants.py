@@ -87,10 +87,13 @@ class Wants:
         phone = str(order["phone"])
         place, url = _place_for(item, city)
         try:
-            cleared = await self.pages.open_and_clear(url)
+            if "papajohns.ru" in url:
+                cleared = await self.pages.reach_order(url, _pizza_name(item), address)
+            else:
+                cleared = await self.pages.open_and_clear(url)
         except Exception:
             await self.runner.execute(f"python -m webbrowser -t {shlex.quote(url)}")
-            cleared = "Баннеры убрать не удалось, страница открыта."
+            cleared = "До оформления дойти не удалось, страница открыта."
         self._order_path().unlink(missing_ok=True)
         return (
             f"Заказ: {item}. Город: {city}. Адрес: {address}. Телефон: {phone}. "
@@ -123,6 +126,14 @@ def _accepts(field: str, value: str) -> bool:
     if field == "city":
         return _CITY.fullmatch(value) is not None
     return len(value) >= 5
+
+
+def _pizza_name(item: str) -> str:
+    lowered = item.casefold()
+    for name in ("Пепперони", "Маргарита", "Сырная"):
+        if name.casefold() in lowered:
+            return name
+    return "Пепперони"
 
 
 def _place_for(item: str, city: str) -> tuple[str, str]:

@@ -36,3 +36,49 @@ async def test_clears_a_popup_and_a_banner_without_a_cross(tmp_path: Path) -> No
     assert "Вы точно тут?" in report
     assert shot.is_file()
     assert shot.stat().st_size > 1000
+
+
+_MENU = """<!doctype html>
+<html><body>
+  <div>
+    <span>Пепперони</span>
+    <button>В корзину</button>
+  </div>
+  <a href="order.html">Оформить</a>
+</body></html>
+"""
+
+_ORDER = """<!doctype html>
+<html><body>
+  <div>Пепперони</div>
+  <div>620 ₽</div>
+  <input name="address_in_line" placeholder="Адрес">
+  <ul id="hints" hidden></ul>
+  <button id="pay" onclick="document.body.dataset.paid='1'">Оформить заказ</button>
+  <script>
+    const field = document.querySelector("input");
+    const hints = document.getElementById("hints");
+    field.addEventListener("input", () => {
+      hints.hidden = false;
+      hints.innerHTML = "<li>Москва, Тверская улица, 1</li>";
+    });
+    hints.addEventListener("click", (event) => {
+      if (event.target.tagName === "LI") field.value = event.target.innerText;
+    });
+  </script>
+</body></html>
+"""
+
+
+@pytest.mark.asyncio
+async def test_reaches_checkout_without_paying(tmp_path: Path) -> None:
+    (tmp_path / "menu.html").write_text(_MENU, encoding="utf-8")
+    (tmp_path / "order.html").write_text(_ORDER, encoding="utf-8")
+    report = await PageCleaner().reach_order(
+        (tmp_path / "menu.html").as_uri(),
+        "Пепперони",
+        "Тверская улица 1",
+    )
+    assert "Пепперони" in report
+    assert "Тверская" in report
+    assert "не нажимал" in report
