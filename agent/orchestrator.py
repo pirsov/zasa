@@ -13,6 +13,7 @@ from agent.executor import EditCommandGenerationError, Executor
 from agent.household import Household
 from agent.mcp_client import McpClient, McpClientError
 from agent.memory import MemoryManager
+from agent.outcomes import Outcomes
 from agent.planner import Planner
 from agent.replanner import Replanner
 from agent.retriever import CodeRetriever
@@ -50,11 +51,14 @@ class Orchestrator:
         self.mcp = McpClient()
         self.memory = MemoryManager("plans/memory.json")
         self.household = Household("home", self.memory, self.tool_runner)
+        self.outcomes = Outcomes()
         self.replanner = Replanner(self._settings)
 
     async def run(self, task: str) -> None:
         try:
             answer = await self.household.handle(task)
+            if answer is None:
+                answer = self.outcomes.achieve(task)
             if answer is not None:
                 self._console.print(answer)
                 self.memory.save_fact(f"Успешно выполнена задача: {task}")
