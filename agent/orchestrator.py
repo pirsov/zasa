@@ -44,7 +44,9 @@ def _question_from_step(step: PlanStep) -> str:
     if symbol.endswith("?") or symbol.endswith("？"):
         return symbol
     if note:
-        return note if note.endswith(".") else f"{note}."
+        if note[-1] in ".?？!:":
+            return note
+        return f"{note}."
     if symbol:
         return f"Напишите: {symbol}."
     return "Напишите, чего не хватает, чтобы закончить."

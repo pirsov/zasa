@@ -216,6 +216,20 @@ async def test_ask_action_waits_for_the_missing_fact(tmp_path: Path) -> None:
 
     facts = orchestrator.memory.load()
     assert "Агент: Для заказа пиццы нужен город." in facts
+    orchestrator.planner.create_plan = AsyncMock(
+        return_value=Plan(
+            goal="адрес",
+            steps=[
+                PlanStep(
+                    id=1,
+                    action=ActionType.ask,
+                    note="Введите адрес, где хотите получить пиццу:",
+                )
+            ],
+        )
+    )
+    await orchestrator.run("Азов")
+    assert "Агент: Введите адрес, где хотите получить пиццу:" in orchestrator.memory.load()
     assert not any(fact.startswith("Успешно") for fact in facts)
     orchestrator.executor.generate_edit_command.assert_not_awaited()
 
