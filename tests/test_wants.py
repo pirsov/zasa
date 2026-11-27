@@ -155,11 +155,13 @@ async def test_list_and_stray_word_are_not_orders(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_orchestrator_asks_instead_of_planning(tmp_path: Path) -> None:
+async def test_wish_goes_to_the_planner(tmp_path: Path) -> None:
+    from unittest.mock import AsyncMock
+
     from tests.test_orchestrator import _orchestrator
 
     orchestrator = _orchestrator(tmp_path)
-    orchestrator.wants = _wants(tmp_path)
+    orchestrator.validator.validate = AsyncMock(return_value=(True, None))
     await orchestrator.run("я хочу пиццу")
-    orchestrator.planner.create_plan.assert_not_awaited()
-    orchestrator.wants.pages.open_and_clear.assert_not_awaited()
+    orchestrator.planner.create_plan.assert_awaited()
+    assert orchestrator.planner.create_plan.await_args.args[0] == "я хочу пиццу"

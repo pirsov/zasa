@@ -10,11 +10,9 @@ from rich.console import Console
 
 from agent.config import Settings, get_settings
 from agent.executor import EditCommandGenerationError, Executor
-from agent.household import Household
+from agent.hands import Hands, HandsError
 from agent.mcp_client import McpClient, McpClientError
 from agent.memory import MemoryManager
-from agent.outcomes import Outcomes
-from agent.wants import Wants
 from agent.planner import Planner
 from agent.replanner import Replanner
 from agent.retriever import CodeRetriever
@@ -51,24 +49,14 @@ class Orchestrator:
         self.tool_runner = ToolRunner()
         self.mcp = McpClient()
         self.memory = MemoryManager("plans/memory.json")
-        self.household = Household("home", self.memory, self.tool_runner)
-        self.outcomes = Outcomes()
-        self.wants = Wants(self.tool_runner, root="home")
+        self.hands = Hands("home")
         self.replanner = Replanner(self._settings)
 
     async def run(self, task: str) -> None:
         try:
-            answer = await self.household.handle(task)
-            if answer is None:
-                answer = self.outcomes.achieve(task)
-            if answer is None:
-                answer = await self.wants.fulfill(task)
-            if answer is not None:
-                self._console.print(answer)
-                self.memory.save_fact(f"Успешно выполнена задача: {task}")
-                return
-            memory_ctx = self.memory.get_context()
-            servers = ", ".join(self.mcp.load_config().mcp_servers)
+            self.memory.save_fact(f"Человек: {task}")
+            memory_ctx = self.memory.get_context(max_facts=20)
+            servers = ", ".join(["hands", *self.mcp.load_config().mcp_servers])
             plan = await self.planner.create_plan(
                 task,
                 mcp_servers=servers,
@@ -79,6 +67,7 @@ class Orchestrator:
             await self._run_steps(plan)
             self.memory.save_fact(f"Успешно выполнена задача: {task}")
         finally:
+            await self.hands.close()
             await self.mcp.close()
 
     def _save_plan(self, plan: Plan) -> Path:
@@ -275,8 +264,13 @@ class Orchestrator:
         server = command.mcp_server or ""
         tool = command.tool_name or ""
         try:
-            text = await self.mcp.call_tool(server, tool, command.tool_arguments)
-        except McpClientError as exc:
+            if server == "hands":
+                text = await self.hands.call(tool, command.tool_arguments)
+                if tool == "ask":
+                    self.memory.save_fact(f"Агент: {text}")
+            else:
+                text = await self.mcp.call_tool(server, tool, command.tool_arguments)
+        except (McpClientError, HandsError) as exc:
             error = ValidatorError(
                 level="L2",
                 message=str(exc),

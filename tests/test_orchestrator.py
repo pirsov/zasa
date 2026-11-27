@@ -10,7 +10,7 @@ import pytest
 
 from agent.config import Settings
 from agent.executor import EditCommandGenerationError
-from agent.household import Household
+from agent.hands import Hands
 from agent.memory import MemoryManager
 from agent.orchestrator import Orchestrator, OrchestratorError
 from agent.schema import ActionType, EditCommand, Plan, PlanStep, ReplanOp, ValidatorError
@@ -62,22 +62,45 @@ def _orchestrator(tmp_path: Path, retries: int = 3) -> Orchestrator:
     orchestrator.executor.generate_edit_command = AsyncMock(return_value=_COMMAND)
     orchestrator.applier.apply = MagicMock()
     orchestrator.memory = MemoryManager(tmp_path / "plans" / "memory.json")
-    orchestrator.household = Household(
-        tmp_path / "home",
-        orchestrator.memory,
-        orchestrator.tool_runner,
-    )
+    orchestrator.hands = Hands(tmp_path / "home")
     orchestrator.replanner.replan = AsyncMock(side_effect=OrchestratorError("replan failed"))
     return orchestrator
 
 
 @pytest.mark.asyncio
-async def test_household_idea_skips_planner(tmp_path: Path) -> None:
+async def test_every_request_goes_to_the_planner(tmp_path: Path) -> None:
     orchestrator = _orchestrator(tmp_path)
+    orchestrator.validator.validate = AsyncMock(return_value=(True, None))
     await orchestrator.run("запомни купить молоко")
-    orchestrator.planner.create_plan.assert_not_awaited()
-    assert "купить молоко" in (tmp_path / "home" / "notes.md").read_text(encoding="utf-8")
-    assert any("молоко" in fact for fact in orchestrator.memory.load())
+    orchestrator.planner.create_plan.assert_awaited()
+    assert orchestrator.planner.create_plan.await_args.args[0] == "запомни купить молоко"
+
+
+@pytest.mark.asyncio
+async def test_agent_runs_the_tool_it_chose(tmp_path: Path) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    orchestrator.hands = Hands(tmp_path / "home")
+    orchestrator.planner.create_plan = AsyncMock(
+        return_value=Plan(
+            goal="узнать город",
+            steps=[PlanStep(id=1, action=ActionType.call_mcp, note="спросить")],
+        )
+    )
+    orchestrator.executor.generate_edit_command = AsyncMock(
+        return_value=EditCommand(
+            action=ActionType.call_mcp,
+            path=".",
+            mcp_server="hands",
+            tool_name="ask",
+            tool_arguments={"text": "В каком городе доставить?"},
+            reason="город не назван",
+        )
+    )
+    await orchestrator.run("я хочу пиццу")
+    orchestrator.planner.create_plan.assert_awaited()
+    facts = orchestrator.memory.load()
+    assert "Человек: я хочу пиццу" in facts
+    assert "Агент: В каком городе доставить?" in facts
 
 
 @pytest.mark.asyncio

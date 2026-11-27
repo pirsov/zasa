@@ -49,12 +49,13 @@ def test_reading_is_not_a_result_to_build(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_orchestrator_builds_the_result_without_a_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_result_request_goes_to_the_planner(tmp_path: Path) -> None:
+    from unittest.mock import AsyncMock
+
     from tests.test_orchestrator import _orchestrator
 
-    monkeypatch.chdir(tmp_path)
     orchestrator = _orchestrator(tmp_path)
-    orchestrator.outcomes = Outcomes(tmp_path)
+    orchestrator.validator.validate = AsyncMock(return_value=(True, None))
     await orchestrator.run("сделай hello.py с функцией hello которая возвращает hello")
-    orchestrator.planner.create_plan.assert_not_awaited()
-    assert (tmp_path / "hello.py").is_file()
+    orchestrator.planner.create_plan.assert_awaited()
+    assert orchestrator.planner.create_plan.await_args.args[0].startswith("сделай hello.py")
