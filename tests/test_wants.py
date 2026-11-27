@@ -53,6 +53,25 @@ async def test_order_collects_address_and_phone_then_opens(tmp_path: Path) -> No
         "улица Ленина, 1",
     )
     assert "не нажимал" in done
+    assert "подтверди" in done
+    assert wants.pages.reach_order.await_args.kwargs["confirm"] is False
+    saved = (tmp_path / "home" / "order.json").read_text(encoding="utf-8")
+    assert "awaiting_confirm" in saved
+
+
+@pytest.mark.asyncio
+async def test_confirmation_presses_the_order_button(tmp_path: Path) -> None:
+    wants = _wants(tmp_path)
+    await wants.fulfill("я хочу пиццу")
+    await wants.fulfill("Москва")
+    await wants.fulfill("улица Ленина, 1")
+    await wants.fulfill("+7 999 123-45-67")
+    wants.pages.reach_order.reset_mock()
+    answer = await wants.fulfill("подтверди")
+    assert answer is not None
+    wants.pages.reach_order.assert_awaited_once()
+    assert wants.pages.reach_order.await_args.kwargs["confirm"] is True
+    assert wants.pages.reach_order.await_args.kwargs["phone"] == "+7 999 123-45-67"
     assert not (tmp_path / "home" / "order.json").exists()
 
 

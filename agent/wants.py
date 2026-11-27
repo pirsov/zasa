@@ -15,6 +15,7 @@ _WANT = re.compile(
     r"^(?:я хочу|хочу|мне нужно|мне нужна|мне нужен|закажи|заказать)\s+(.+)$",
     re.IGNORECASE,
 )
+_CONFIRM = re.compile(r"^(?:подтверди|подтверждаю|подтвердить)\b", re.IGNORECASE)
 _CITY = re.compile(r"^[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё\-\s]{1,40}$")
 _FIELDS = ("city", "address", "phone")
 _QUESTIONS = {
@@ -42,6 +43,10 @@ class Wants:
         if not text:
             return None
         order = _read_json(self._order_path())
+        if order.get("status") == "awaiting_confirm" and _CONFIRM.match(text):
+            return await self._submit(order)
+        if order.get("status") == "awaiting_confirm" and _WANT.match(text) is None:
+            return "Жду подтверждения. Напишите «подтверди», чтобы оформить заказ."
         want = _WANT.match(text)
         if want is not None:
             item = want.group(1).strip(" .,!?:;")
@@ -88,17 +93,45 @@ class Wants:
         place, url = _place_for(item, city)
         try:
             if "papajohns.ru" in url:
-                cleared = await self.pages.reach_order(url, _pizza_name(item), address)
+                cleared = await self.pages.reach_order(
+                    url,
+                    _pizza_name(item),
+                    address,
+                    confirm=False,
+                    phone=phone,
+                )
             else:
                 cleared = await self.pages.open_and_clear(url)
         except Exception:
             await self.runner.execute(f"python -m webbrowser -t {shlex.quote(url)}")
             cleared = "До оформления дойти не удалось, страница открыта."
-        self._order_path().unlink(missing_ok=True)
+        order["status"] = "awaiting_confirm"
+        order["place_url"] = url
+        order["product"] = _pizza_name(item) if "papajohns.ru" in url else item
+        _write_json(self._order_path(), order)
         return (
             f"Заказ: {item}. Город: {city}. Адрес: {address}. Телефон: {phone}. "
-            f"Открываю {place}: {url}. {cleared}"
+            f"Открываю {place}: {url}. {cleared} "
+            "Подтвердить оформление? Напишите «подтверди»."
         )
+
+    async def _submit(self, order: dict[str, str]) -> str:
+        url = order.get("place_url") or ""
+        product = order.get("product") or _pizza_name(str(order.get("item") or ""))
+        address = str(order.get("address") or "")
+        phone = str(order.get("phone") or "")
+        try:
+            result = await self.pages.reach_order(
+                url,
+                product,
+                address,
+                confirm=True,
+                phone=phone,
+            )
+        except Exception:
+            return "Подтверждение есть, но сайт оформление не принял."
+        self._order_path().unlink(missing_ok=True)
+        return result
 
     def _order_path(self) -> Path:
         return self.root / "order.json"
