@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agent.config import Settings
+from agent.executor import EditCommandGenerationError
 from agent.memory import MemoryManager
 from agent.orchestrator import Orchestrator, OrchestratorError
 from agent.schema import ActionType, EditCommand, Plan, PlanStep, ReplanOp, ValidatorError
@@ -152,4 +153,31 @@ async def test_replan_on_failure(tmp_path: Path) -> None:
     failed_step = orchestrator.replanner.replan.await_args.args[1]
     assert failed_step.id == 1
     assert orchestrator.replanner.replan.await_args.args[2] == _ERROR
+    assert orchestrator.applier.apply.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_generation_error_triggers_replan(tmp_path: Path) -> None:
+    orchestrator = _orchestrator(tmp_path, retries=2)
+    orchestrator.planner.create_plan = AsyncMock(
+        return_value=Plan(
+            goal="проверка",
+            steps=[PlanStep(id=1, action=ActionType.run_check, note="pytest")],
+        )
+    )
+    orchestrator.executor.generate_edit_command = AsyncMock(
+        side_effect=EditCommandGenerationError("path is null")
+    )
+    orchestrator.replanner.replan = AsyncMock(
+        return_value=ReplanOp(
+            operation="drop_step",
+            target_step_id=1,
+            reason="проверку можно пропустить",
+        )
+    )
+
+    await orchestrator.run("проверка")
+
+    assert orchestrator.executor.generate_edit_command.await_count == 2
+    orchestrator.replanner.replan.assert_awaited()
     assert orchestrator.applier.apply.call_count == 0

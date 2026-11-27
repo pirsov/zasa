@@ -101,6 +101,9 @@ class Validator:
         if command.action == ActionType.call_mcp:
             return True, None
 
+        if command.action == ActionType.run_check and not command.path:
+            return True, None
+
         if command.action == ActionType.run_command:
             blocked = _blocked_command(command.command or "")
             if blocked is not None:

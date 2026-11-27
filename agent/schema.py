@@ -38,7 +38,7 @@ class EditCommand(BaseModel):
     """Ответ исполнителя: одно изменение в кодовой базе."""
 
     action: ActionType
-    path: str
+    path: str | None = None
     symbol: str | None = None
     new_code: str | None = None
     command: str | None = None
@@ -49,7 +49,9 @@ class EditCommand(BaseModel):
 
     @field_validator("path")
     @classmethod
-    def path_must_be_relative(cls, value: str) -> str:
+    def path_must_be_relative(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         normalized = value.replace("\\", "/")
         if normalized.startswith("/"):
             raise ValueError("path must be relative and must not start with '/'")
@@ -59,6 +61,8 @@ class EditCommand(BaseModel):
 
     @model_validator(mode="after")
     def require_fields_for_action(self) -> EditCommand:
+        if self.action != ActionType.run_check and not self.path:
+            raise ValueError("path is required unless action is run_check")
         if self.action in _ACTIONS_REQUIRING_CODE and not self.new_code:
             raise ValueError(
                 "new_code is required and must be non-empty when action is "

@@ -30,6 +30,24 @@ def test_replace_symbol_without_new_code_fails() -> None:
         )
 
 
+def test_run_check_without_path_parses() -> None:
+    command = EditCommand(
+        action=ActionType.run_check,
+        reason="проверить проект",
+    )
+    assert command.path is None
+    assert command.action is ActionType.run_check
+
+
+def test_missing_path_fails_for_file_actions() -> None:
+    with pytest.raises(ValidationError):
+        EditCommand(
+            action=ActionType.read_symbol,
+            symbol="foo",
+            reason="нет пути",
+        )
+
+
 def test_path_with_parent_segment_fails() -> None:
     with pytest.raises(ValidationError):
         EditCommand(

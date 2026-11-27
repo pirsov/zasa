@@ -122,6 +122,14 @@ def test_applier_replace_method_keeps_indent(
     )
 
 
+def test_run_check_without_path_passes() -> None:
+    command = EditCommand(
+        action=ActionType.run_check,
+        reason="проверка без файла",
+    )
+    assert asyncio.run(_validator().validate(command)) == (True, None)
+
+
 def test_l4_dangerous_command() -> None:
     command = EditCommand(
         action=ActionType.run_command,

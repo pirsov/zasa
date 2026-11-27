@@ -29,10 +29,11 @@ You must output ONLY a JSON object matching this schema:
 RULES:
 1. For 'replace_symbol': 'new_code' must be the COMPLETE definition of the symbol (including def/class line), with correct indentation.
 2. Do not output diffs or partial lines. Always output the full block.
-3. If the action is 'read_symbol' or 'run_check', 'new_code' must be null.
-4. Use 'run_command' to execute shell commands (e.g., to run tests, list files, or use system tools). Put the exact shell command in the 'command' field. The schema field "command" is required for run_command and must be null for every other action. 'new_code' and 'symbol' are not required for run_command.
-5. Use 'call_mcp' to call one tool on an MCP server from mcp_config.json (browser, OS, files, and other external tools). Put the server name in 'mcp_server', the tool name in 'tool_name', and the JSON arguments in 'tool_arguments'. Those three fields must be null for every other action. 'path' may be "." when the tool is not about a file.
-6. Never write explanations. Just the JSON.
+3. If the action is 'read_symbol' or 'run_check', 'new_code' must be null. For 'run_check', 'path' may be null when the check is not about one file. For every other action, 'path' is required.
+4. For 'write_file', 'new_code' is the entire file. Keep every function that must remain.
+5. Use 'run_command' to execute shell commands (e.g., to run tests, list files, or use system tools). Put the exact shell command in the 'command' field. The schema field "command" is required for run_command and must be null for every other action. 'new_code' and 'symbol' are not required for run_command.
+6. Use 'call_mcp' to call one tool on an MCP server from mcp_config.json (browser, OS, files, and other external tools). Put the server name in 'mcp_server', the tool name in 'tool_name', and the JSON arguments in 'tool_arguments'. Those three fields must be null for every other action. 'path' may be "." when the tool is not about a file.
+7. Never write explanations. Just the JSON.
 
 GOAL OF THE WHOLE PLAN: {{plan_goal}}
 CURRENT STEP: {{step_json}}

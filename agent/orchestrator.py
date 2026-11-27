@@ -9,7 +9,7 @@ from pathlib import Path
 from rich.console import Console
 
 from agent.config import Settings, get_settings
-from agent.executor import Executor
+from agent.executor import EditCommandGenerationError, Executor
 from agent.mcp_client import McpClient, McpClientError
 from agent.memory import MemoryManager
 from agent.planner import Planner
@@ -158,12 +158,23 @@ class Orchestrator:
     ) -> ValidatorError | None:
         retries = self._settings.max_step_retries
         for attempt in range(1, retries + 1):
-            command = await self.executor.generate_edit_command(
-                plan_goal,
-                step,
-                context,
-                previous_error,
-            )
+            try:
+                command = await self.executor.generate_edit_command(
+                    plan_goal,
+                    step,
+                    context,
+                    previous_error,
+                )
+            except EditCommandGenerationError as exc:
+                previous_error = ValidatorError(
+                    level="L1",
+                    message=str(exc),
+                    hint="Return one EditCommand. path may be null only for run_check.",
+                )
+                self._console.print(
+                    f"[red]Шаг {step.id}, попытка {attempt}/{retries}: {previous_error.message}[/red]"
+                )
+                continue
             success, error = await self.validator.validate(command)
             if success and (
                 step.action == ActionType.call_mcp or command.action == ActionType.call_mcp
@@ -180,6 +191,9 @@ class Orchestrator:
                 if finished:
                     return
                 continue
+            if success and command.action == ActionType.run_check and not command.path:
+                self._console.print(f"[green]Шаг {step.id} выполнен: run_check[/green]")
+                return
             if success:
                 self.applier.apply(command)
                 self._console.print(
