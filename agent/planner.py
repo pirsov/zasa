@@ -32,9 +32,12 @@ class Planner:
         memory_ctx: str = "",
     ) -> Plan:
         system_prompt = _render_system_prompt(task, repo_map, mcp_servers, memory_ctx)
+        user_content = task
+        if memory_ctx.strip():
+            user_content = f"Диалог:\n{memory_ctx}\n\nНовая фраза: {task}"
         messages: list[dict[str, str]] = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": task},
+            {"role": "user", "content": user_content},
         ]
         url = f"{self._settings.ollama_base_url.rstrip('/')}/api/chat"
         last_error = "модель не вернула план"

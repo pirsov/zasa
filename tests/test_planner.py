@@ -76,6 +76,24 @@ def test_create_plan_success() -> None:
     assert '"goal"' in payload["messages"][0]["content"]
 
 
+def test_create_plan_puts_the_dialogue_next_to_the_new_phrase() -> None:
+    planner = Planner(_settings())
+    with respx.mock:
+        route = respx.post(_CHAT_URL).mock(return_value=_ollama(_VALID_PLAN))
+        asyncio.run(
+            planner.create_plan(
+                "Выдумай рандомный дом",
+                memory_ctx="Человек: Азов\nАгент: Введите адрес",
+            )
+        )
+
+    payload = json.loads(route.calls[0].request.content)
+    text = payload["messages"][1]["content"]
+    assert "Диалог:" in text
+    assert "Человек: Азов" in text
+    assert "Новая фраза: Выдумай рандомный дом" in text
+
+
 def test_create_plan_retry() -> None:
     planner = Planner(_settings())
     with respx.mock:
