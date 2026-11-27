@@ -196,6 +196,57 @@ async def test_unfinished_plan_continues(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_ask_action_waits_for_the_missing_fact(tmp_path: Path) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    orchestrator.planner.create_plan = AsyncMock(
+        return_value=Plan(
+            goal="получить пиццу",
+            steps=[
+                PlanStep(
+                    id=1,
+                    action=ActionType.ask,
+                    symbol="город",
+                    note="Для заказа пиццы нужен город.",
+                )
+            ],
+        )
+    )
+
+    await orchestrator.run("я хочу пиццу")
+
+    facts = orchestrator.memory.load()
+    assert "Агент: Для заказа пиццы нужен город." in facts
+    assert not any(fact.startswith("Успешно") for fact in facts)
+    orchestrator.executor.generate_edit_command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_echo_question_waits_for_the_person(tmp_path: Path) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    orchestrator.validator.validate = AsyncMock(return_value=(True, None))
+    orchestrator.planner.create_plan = AsyncMock(
+        return_value=Plan(
+            goal="пицца",
+            steps=[PlanStep(id=1, action=ActionType.run_command, note="спросить")],
+        )
+    )
+    orchestrator.executor.generate_edit_command = AsyncMock(
+        return_value=EditCommand(
+            action=ActionType.run_command,
+            path=".",
+            command="echo 'Какую пиццу вы хотите заказать?'",
+            reason="спросить",
+        )
+    )
+
+    await orchestrator.run("я хочу пиццу")
+
+    facts = orchestrator.memory.load()
+    assert "Агент: Какую пиццу вы хотите заказать?" in facts
+    assert not any(fact.startswith("Успешно") for fact in facts)
+
+
+@pytest.mark.asyncio
 async def test_ask_stops_until_the_person_answers(tmp_path: Path) -> None:
     orchestrator = _orchestrator(tmp_path)
     orchestrator.planner.create_plan = AsyncMock(

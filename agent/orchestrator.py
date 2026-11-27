@@ -36,6 +36,38 @@ class OrchestratorError(RuntimeError):
     """План остановлен: шаг не выполнен или зависимость не готова."""
 
 
+def _question_from_step(step: PlanStep) -> str:
+    note = (step.note or "").strip()
+    symbol = (step.symbol or "").strip()
+    if note.endswith("?") or note.endswith("？"):
+        return note
+    if symbol.endswith("?") or symbol.endswith("？"):
+        return symbol
+    if note:
+        return note if note.endswith(".") else f"{note}."
+    if symbol:
+        return f"Напишите: {symbol}."
+    return "Напишите, чего не хватает, чтобы закончить."
+
+
+def _spoken_question(command: str, stdout: str) -> str | None:
+    """Команда, которая только спрашивает человека, не является результатом."""
+    text = stdout.strip()
+    quoted = command.strip()
+    if quoted.startswith("echo ") or quoted.startswith("printf "):
+        for mark in ("'", '"'):
+            if quoted.count(mark) >= 2:
+                inner = quoted.split(mark, 2)[1].strip()
+                if inner:
+                    text = inner
+                break
+    if not text or "\n" in text or len(text) > 300:
+        return None
+    if text.endswith("?") or text.endswith("？"):
+        return text
+    return None
+
+
 def _blocker_question(step: PlanStep, reason: str) -> str:
     label = step.note or step.action.value
     return (
@@ -125,6 +157,9 @@ class Orchestrator:
         replans = 0
         while index < len(plan.steps):
             step = plan.steps[index]
+            if step.action == ActionType.ask:
+                self._ask(_question_from_step(step))
+                return
             pending = [dep for dep in step.depends_on if dep not in done]
             if pending:
                 self._ask(
@@ -284,6 +319,12 @@ class Orchestrator:
         returncode, stdout, stderr = await self.tool_runner.execute(shell)
         self._print_streams(returncode, stdout, stderr)
         if returncode == 0:
+            question = _spoken_question(shell, stdout)
+            if question is not None:
+                self.memory.save_fact(f"Агент: {question}")
+                self._waiting_for_person = True
+                self._console.print(f"[green]Шаг {step.id} ждёт ответ.[/green]")
+                return True, None
             self._console.print(f"[green]Шаг {step.id} выполнен: {shell}[/green]")
             return True, None
 

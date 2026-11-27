@@ -17,6 +17,7 @@ class ActionType(str, Enum):
     run_check = "run_check"
     run_command = "run_command"
     call_mcp = "call_mcp"
+    ask = "ask"
 
 
 _ACTIONS_REQUIRING_CODE = frozenset(
