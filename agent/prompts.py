@@ -16,6 +16,7 @@ RULES:
 
 TASK: {{task}}
 REPO MAP (available files and symbols): {{repo_map}}
+MEMORY (facts from previous runs): {{memory_ctx}}
 
 Output JSON:
 """
@@ -37,6 +38,19 @@ GOAL OF THE WHOLE PLAN: {{plan_goal}}
 CURRENT STEP: {{step_json}}
 CODE CONTEXT: {{step_context}}
 {{previous_error_text}}
+
+Output JSON:
+"""
+
+REPLANNER_SYSTEM_PROMPT = """
+You are a replanner. A step in the plan has failed multiple times.
+Your job is to fix the plan by inserting a step before it, replacing it, or dropping it.
+Output ONLY a JSON object matching this schema:
+{{replan_json_schema}}
+
+ORIGINAL PLAN: {{plan_json}}
+FAILED STEP: {{failed_step_json}}
+ERROR: {{error_message}}
 
 Output JSON:
 """

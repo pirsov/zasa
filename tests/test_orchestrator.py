@@ -9,8 +9,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agent.config import Settings
+from agent.memory import MemoryManager
 from agent.orchestrator import Orchestrator, OrchestratorError
-from agent.schema import ActionType, EditCommand, Plan, PlanStep, ValidatorError
+from agent.schema import ActionType, EditCommand, Plan, PlanStep, ReplanOp, ValidatorError
 
 _COMMAND = EditCommand(
     action=ActionType.read_symbol,
@@ -58,6 +59,8 @@ def _orchestrator(tmp_path: Path, retries: int = 3) -> Orchestrator:
     orchestrator.planner.create_plan = AsyncMock(return_value=_plan())
     orchestrator.executor.generate_edit_command = AsyncMock(return_value=_COMMAND)
     orchestrator.applier.apply = MagicMock()
+    orchestrator.memory = MemoryManager(tmp_path / "plans" / "memory.json")
+    orchestrator.replanner.replan = AsyncMock(side_effect=OrchestratorError("replan failed"))
     return orchestrator
 
 
@@ -115,4 +118,38 @@ async def test_run_fail_after_max_retries(tmp_path: Path) -> None:
         await orchestrator.run("сделать два шага")
 
     assert orchestrator.executor.generate_edit_command.await_count == retries
+    assert orchestrator.applier.apply.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_replan_on_failure(tmp_path: Path) -> None:
+    orchestrator = _orchestrator(tmp_path, retries=2)
+    orchestrator.planner.create_plan = AsyncMock(
+        return_value=Plan(
+            goal="один шаг",
+            steps=[
+                PlanStep(
+                    id=1,
+                    action=ActionType.read_symbol,
+                    path="a.py",
+                    symbol="foo",
+                )
+            ],
+        )
+    )
+    orchestrator.validator.validate = AsyncMock(return_value=(False, _ERROR))
+    orchestrator.replanner.replan = AsyncMock(
+        return_value=ReplanOp(
+            operation="drop_step",
+            target_step_id=1,
+            reason="шаг невозможно выполнить",
+        )
+    )
+
+    await orchestrator.run("один шаг")
+
+    orchestrator.replanner.replan.assert_awaited()
+    failed_step = orchestrator.replanner.replan.await_args.args[1]
+    assert failed_step.id == 1
+    assert orchestrator.replanner.replan.await_args.args[2] == _ERROR
     assert orchestrator.applier.apply.call_count == 0

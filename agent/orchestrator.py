@@ -11,11 +11,15 @@ from rich.console import Console
 from agent.config import Settings, get_settings
 from agent.executor import Executor
 from agent.mcp_client import McpClient, McpClientError
+from agent.memory import MemoryManager
 from agent.planner import Planner
+from agent.replanner import Replanner
 from agent.retriever import CodeRetriever
-from agent.schema import ActionType, EditCommand, Plan, PlanStep, ValidatorError
+from agent.schema import ActionType, EditCommand, Plan, PlanStep, ReplanOp, ValidatorError
 from agent.tool_runner import ToolRunner
 from agent.validator import Applier, Validator
+
+_MAX_REPLANS = 3
 
 _SYMBOL_ACTIONS = frozenset(
     {
@@ -43,20 +47,22 @@ class Orchestrator:
         self.applier = Applier(self.retriever)
         self.tool_runner = ToolRunner()
         self.mcp = McpClient()
+        self.memory = MemoryManager("plans/memory.json")
+        self.replanner = Replanner(self._settings)
 
     async def run(self, task: str) -> None:
         try:
+            memory_ctx = self.memory.get_context()
             servers = ", ".join(self.mcp.load_config().mcp_servers)
-            plan = await self.planner.create_plan(task, mcp_servers=servers)
+            plan = await self.planner.create_plan(
+                task,
+                mcp_servers=servers,
+                memory_ctx=memory_ctx,
+            )
             self._save_plan(plan)
             self._print_plan(plan)
-
-            done: set[int] = set()
-            for step in plan.steps:
-                self._ensure_dependencies(step, done)
-                context, previous_error = self._context_for(step)
-                await self._execute_step(plan.goal, step, context, previous_error)
-                done.add(step.id)
+            await self._run_steps(plan)
+            self.memory.save_fact(f"Успешно выполнена задача: {task}")
         finally:
             await self.mcp.close()
 
@@ -69,6 +75,52 @@ class Orchestrator:
             json.dump(plan.model_dump(mode="json"), handle, ensure_ascii=False, indent=2)
             handle.write("\n")
         return path
+
+    async def _run_steps(self, plan: Plan) -> None:
+        index = 0
+        done: set[int] = set()
+        replans = 0
+        while index < len(plan.steps):
+            step = plan.steps[index]
+            self._ensure_dependencies(step, done)
+            context, previous_error = self._context_for(step)
+            error = await self._execute_step(plan.goal, step, context, previous_error)
+            if error is None:
+                done.add(step.id)
+                index += 1
+                continue
+            if replans >= _MAX_REPLANS:
+                raise OrchestratorError(
+                    f"Шаг {step.id} не выполнен, репланнер исчерпал попытки"
+                )
+            operation = await self.replanner.replan(plan, step, error)
+            index = self._apply_replan(plan, index, operation)
+            replans += 1
+            self._console.print(
+                "[yellow]План изменен Репланнером: "
+                f"{operation.operation} шаг {operation.target_step_id}. "
+                f"{operation.reason}[/yellow]"
+            )
+            self._print_plan(plan)
+
+    def _apply_replan(self, plan: Plan, index: int, operation: ReplanOp) -> int:
+        position = index
+        for i, step in enumerate(plan.steps):
+            if step.id == operation.target_step_id:
+                position = i
+                break
+        if operation.operation == "drop_step":
+            del plan.steps[position]
+            return position
+        if operation.operation == "replace_step":
+            if operation.new_steps:
+                plan.steps[position : position + 1] = list(operation.new_steps)
+            else:
+                del plan.steps[position]
+            return position
+        for offset, step in enumerate(operation.new_steps):
+            plan.steps.insert(position + offset, step)
+        return position
 
     def _print_plan(self, plan: Plan) -> None:
         self._console.print(f"[bold]План:[/bold] {plan.goal}")
@@ -103,7 +155,7 @@ class Orchestrator:
         step: PlanStep,
         context: str,
         previous_error: ValidatorError | None,
-    ) -> None:
+    ) -> ValidatorError | None:
         retries = self._settings.max_step_retries
         for attempt in range(1, retries + 1):
             command = await self.executor.generate_edit_command(
@@ -141,11 +193,11 @@ class Orchestrator:
             )
 
         self._console.print(
-            f"[bold red]Шаг {step.id} не выполнен за {retries} попыток. "
-            "Выполнение плана остановлено.[/bold red]"
+            f"[bold red]Шаг {step.id} не выполнен за {retries} попыток.[/bold red]"
         )
-        raise OrchestratorError(
-            f"Шаг {step.id} не выполнен за {retries} попыток"
+        return previous_error or ValidatorError(
+            level="L2",
+            message=f"Шаг {step.id} не выполнен за {retries} попыток",
         )
 
     async def _run_shell(
