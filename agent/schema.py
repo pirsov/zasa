@@ -16,6 +16,7 @@ class ActionType(str, Enum):
     read_symbol = "read_symbol"
     run_check = "run_check"
     run_command = "run_command"
+    call_mcp = "call_mcp"
 
 
 _ACTIONS_REQUIRING_CODE = frozenset(
@@ -41,6 +42,9 @@ class EditCommand(BaseModel):
     symbol: str | None = None
     new_code: str | None = None
     command: str | None = None
+    mcp_server: str | None = None
+    tool_name: str | None = None
+    tool_arguments: dict[str, Any] | None = None
     reason: str
 
     @field_validator("path")
@@ -70,6 +74,15 @@ class EditCommand(BaseModel):
                 raise ValueError("command is required when action is run_command")
         elif self.command is not None:
             raise ValueError("command must be None unless action is run_command")
+        if self.action == ActionType.call_mcp:
+            if self.mcp_server is None or not self.mcp_server.strip():
+                raise ValueError("mcp_server is required when action is call_mcp")
+            if self.tool_name is None or not self.tool_name.strip():
+                raise ValueError("tool_name is required when action is call_mcp")
+        elif self.mcp_server is not None or self.tool_name is not None or self.tool_arguments is not None:
+            raise ValueError(
+                "mcp_server, tool_name, and tool_arguments must be None unless action is call_mcp"
+            )
         return self
 
 

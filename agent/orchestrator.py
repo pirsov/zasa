@@ -10,6 +10,7 @@ from rich.console import Console
 
 from agent.config import Settings, get_settings
 from agent.executor import Executor
+from agent.mcp_client import McpClient, McpClientError
 from agent.planner import Planner
 from agent.retriever import CodeRetriever
 from agent.schema import ActionType, EditCommand, Plan, PlanStep, ValidatorError
@@ -41,18 +42,23 @@ class Orchestrator:
         self.validator = Validator(self.retriever)
         self.applier = Applier(self.retriever)
         self.tool_runner = ToolRunner()
+        self.mcp = McpClient()
 
     async def run(self, task: str) -> None:
-        plan = await self.planner.create_plan(task)
-        self._save_plan(plan)
-        self._print_plan(plan)
+        try:
+            servers = ", ".join(self.mcp.load_config().mcp_servers)
+            plan = await self.planner.create_plan(task, mcp_servers=servers)
+            self._save_plan(plan)
+            self._print_plan(plan)
 
-        done: set[int] = set()
-        for step in plan.steps:
-            self._ensure_dependencies(step, done)
-            context, previous_error = self._context_for(step)
-            await self._execute_step(plan.goal, step, context, previous_error)
-            done.add(step.id)
+            done: set[int] = set()
+            for step in plan.steps:
+                self._ensure_dependencies(step, done)
+                context, previous_error = self._context_for(step)
+                await self._execute_step(plan.goal, step, context, previous_error)
+                done.add(step.id)
+        finally:
+            await self.mcp.close()
 
     def _save_plan(self, plan: Plan) -> Path:
         directory = Path(self._settings.plans_dir)
@@ -107,6 +113,13 @@ class Orchestrator:
                 previous_error,
             )
             success, error = await self.validator.validate(command)
+            if success and (
+                step.action == ActionType.call_mcp or command.action == ActionType.call_mcp
+            ):
+                finished, previous_error = await self._call_mcp(step, command, attempt, retries)
+                if finished:
+                    return
+                continue
             if success and (
                 step.action == ActionType.run_command
                 or command.action == ActionType.run_command
@@ -170,6 +183,32 @@ class Orchestrator:
             f"[red]Шаг {step.id}, попытка {attempt}/{retries}: {error.message}[/red]"
         )
         return False, error
+
+    async def _call_mcp(
+        self,
+        step: PlanStep,
+        command: EditCommand,
+        attempt: int,
+        retries: int,
+    ) -> tuple[bool, ValidatorError | None]:
+        server = command.mcp_server or ""
+        tool = command.tool_name or ""
+        try:
+            text = await self.mcp.call_tool(server, tool, command.tool_arguments)
+        except McpClientError as exc:
+            error = ValidatorError(
+                level="L2",
+                message=str(exc),
+                hint="Fix the MCP server, tool name, or arguments",
+            )
+            self._console.print(
+                f"[red]Шаг {step.id}, попытка {attempt}/{retries}: {error.message}[/red]"
+            )
+            return False, error
+        if text:
+            self._console.print(text, style="green")
+        self._console.print(f"[green]Шаг {step.id} выполнен: {server}/{tool}[/green]")
+        return True, None
 
     def _print_streams(self, returncode: int, stdout: str, stderr: str) -> None:
         style = "green" if returncode == 0 else "red"

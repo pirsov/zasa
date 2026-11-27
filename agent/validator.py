@@ -98,6 +98,9 @@ class Validator:
                 hint="Build the command with the EditCommand schema",
             )
 
+        if command.action == ActionType.call_mcp:
+            return True, None
+
         if command.action == ActionType.run_command:
             blocked = _blocked_command(command.command or "")
             if blocked is not None:

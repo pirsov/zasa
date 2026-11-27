@@ -24,8 +24,8 @@ class Planner:
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
 
-    async def create_plan(self, task: str, repo_map: str = "") -> Plan:
-        system_prompt = _render_system_prompt(task, repo_map)
+    async def create_plan(self, task: str, repo_map: str = "", mcp_servers: str = "") -> Plan:
+        system_prompt = _render_system_prompt(task, repo_map, mcp_servers)
         messages: list[dict[str, str]] = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": task},
@@ -68,11 +68,12 @@ class Planner:
         )
 
 
-def _render_system_prompt(task: str, repo_map: str) -> str:
+def _render_system_prompt(task: str, repo_map: str, mcp_servers: str) -> str:
     schema = json.dumps(plan_json_schema(), ensure_ascii=False, indent=2)
     template = PLANNER_SYSTEM_PROMPT.replace("{{", "{").replace("}}", "}")
     return template.format(
         plan_json_schema=schema,
         task=task,
         repo_map=repo_map,
+        mcp_servers=mcp_servers or "none",
     )
